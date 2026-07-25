@@ -43,7 +43,10 @@ extern "C" {
 #endif
 
 // System includes
-//#include <stdio.h>
+// Symbian: ESTLIB does not pull stdio.h in transitively the way glibc does,
+// so FILE would be undefined in cdriso.c and friends. Including it here keeps
+// the ordering correct (this header is processed after the forced GCCE.h).
+#include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>

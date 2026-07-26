@@ -23,7 +23,9 @@
 #include <stdint.h>
 #include <assert.h>
 #include <errno.h>
+#ifndef __SYMBIAN32__
 #include <sys/mman.h>
+#endif
 #include <unistd.h>
 #ifdef __MACH__
 #include <libkern/OSCacheControl.h>
@@ -34,6 +36,14 @@
 #ifdef HAVE_LIBNX
 #include <switch.h>
 static Jit g_jit;
+#endif
+#ifdef __SYMBIAN32__
+// RChunk/User::IMB_Range are C++ only, so they live behind a C shim
+// (src/symbian/ndrc_mem_symbian.cpp in the shell repository).
+void *ndrc_symbian_alloc(unsigned int size);
+void ndrc_symbian_free(void *base);
+void ndrc_symbian_imb(void *start, void *end);
+int ndrc_symbian_pgsize(void);
 #endif
 
 #include "new_dynarec_config.h"
@@ -717,6 +727,8 @@ void new_dyna_clear_cache(void *start, void *end)
     // as of v4.2.1 libnx lacks isb
     __asm__ volatile("isb" ::: "memory");
   }
+  #elif defined(__SYMBIAN32__)
+  ndrc_symbian_imb(start, end);
   #elif defined(__aarch64__)
   // __clear_cache() doesn't handle differing cacheline sizes on big.LITTLE and
   // leaves it to the kernel to virtualize ctr_el0, which some old kernels don't do
@@ -1142,7 +1154,11 @@ static void clear_all_regs(signed char regmap[])
 
 // get_reg: get allocated host reg from mips reg
 // returns -1 if no such mips reg was allocated
-#if defined(__arm__) && defined(HAVE_ARMV6) && HOST_REGS == 13 && EXCLUDE_REG == 11
+// NDRC_NO_ARMV6_GET_REG forces the C version. The asm one uses uadd8/sel, which
+// some ARM interpreters (EKA2L1's Dynarmic) do not implement; the fallback lets
+// the rest of the dynarec be exercised there. Real hardware should not set it.
+#if defined(__arm__) && defined(HAVE_ARMV6) && HOST_REGS == 13 && EXCLUDE_REG == 11 \
+    && !defined(NDRC_NO_ARMV6_GET_REG)
 
 extern signed char get_reg(const signed char regmap[], signed char r);
 
@@ -6660,7 +6676,10 @@ void new_dynarec_clear_full(void)
 static int pgsize(void)
 {
   long ret = -1;
-#ifdef _SC_PAGESIZE
+#if defined(__SYMBIAN32__)
+  // ESTLIB declares _SC_PAGESIZE but ships no sysconf; HAL has the value.
+  ret = ndrc_symbian_pgsize();
+#elif defined(_SC_PAGESIZE)
   ret = sysconf(_SC_PAGESIZE);
 #endif
   if (ret < 1)
@@ -6697,6 +6716,12 @@ void new_dynarec_init(void)
   ndrc = g_jit.rx_addr;
   ndrc_write_ofs = (char *)g_jit.rw_addr - (char *)ndrc;
   memset(NDRC_WRITE_OFFSET(&ndrc->tramp), 0, sizeof(ndrc->tramp));
+  #elif defined(__SYMBIAN32__)
+  ndrc = ndrc_symbian_alloc(sizeof(*ndrc));
+  if (ndrc == NULL) {
+    SysPrintf("ndrc_symbian_alloc(%d) failed\n", (int)sizeof(*ndrc));
+    abort();
+  }
   #else
   uintptr_t desired_addr = 0;
   int prot = PROT_READ | PROT_WRITE | PROT_EXEC;
@@ -6767,6 +6792,9 @@ void new_dynarec_cleanup(void)
   //sceBlock = -1;
   #elif defined(HAVE_LIBNX)
   jitClose(&g_jit);
+  ndrc = NULL;
+  #elif defined(__SYMBIAN32__)
+  ndrc_symbian_free(ndrc);
   ndrc = NULL;
   #else
   if (munmap(ndrc, sizeof(*ndrc)) < 0)

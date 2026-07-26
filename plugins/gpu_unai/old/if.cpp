@@ -408,7 +408,7 @@ int oldunai_do_cmd_list(uint32_t *list, int list_len, uint32_t *ex_regs,
 
       case 0x7C:
       case 0x7D:
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
         if ((GPU_GP1 & 0x180) == 0 && (Masking | PixelMSB) == 0)
         {
           gpuSetCLUT    (PacketBuffer.U4[2] >> 16);

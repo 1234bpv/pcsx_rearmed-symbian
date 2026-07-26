@@ -36,6 +36,14 @@
 //#define ENABLE_GPU_LOG_SUPPORT    // Enables gpu logger, very slow only for windows debugging
 //#define ENABLE_GPU_ARMV7			// Enables ARMv7 optimized assembly
 
+// ARM assembly drivers (gpu_arm.S plus the inline-asm blend/light headers) are
+// used by default on ARM. Define GPU_UNAI_NO_ARM_ASM to fall back to the plain
+// C paths: needed with assemblers that cannot build gpu_arm.S, such as the one
+// bundled with GCC 3.4.3, which does not substitute macro parameters inside .if
+#if defined(__arm__) && !defined(GPU_UNAI_NO_ARM_ASM)
+#define GPU_UNAI_ARM_ASM
+#endif
+
 //Poly routine options (default is integer math and accurate division)
 //#define GPU_UNAI_USE_FLOATMATH         // Use float math in poly routines
 //#define GPU_UNAI_USE_FLOAT_DIV_MULTINV // If GPU_UNAI_USE_FLOATMATH is defined,

@@ -84,7 +84,7 @@ void gpuDrawS(const PS gpuSpriteSpanDriver)
 	}
 }
 
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
 #include "../gpu_arm.h"
 
 void gpuDrawS16(void)
@@ -123,7 +123,7 @@ void gpuDrawS16(void)
 
 	sprite_4bpp_x16_asm(&GPU_FrameBuffer[FRAME_OFFSET(x0, y0)], &TBA[FRAME_OFFSET(u0/4, v0)], CBA, h);
 }
-#endif // __arm__
+#endif // GPU_UNAI_ARM_ASM
 
 ///////////////////////////////////////////////////////////////////////////////
 void gpuDrawT(const PT gpuTileSpanDriver)

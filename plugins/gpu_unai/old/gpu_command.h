@@ -353,7 +353,7 @@ void gpuSendPacketFunction(const int PRIM)
 			break;
 		case 0x7C:
 		case 0x7D:
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
 			if ((GPU_GP1 & 0x180) == 0 && (Masking | PixelMSB) == 0)
 			{
 				gpuSetCLUT    (PacketBuffer.U4[2] >> 16);

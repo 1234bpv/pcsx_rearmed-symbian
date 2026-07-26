@@ -42,7 +42,7 @@
 
 #include "arm_features.h"
 #include "compiler_features.h"
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
 #include "gpu_arm.h"
 #include "gpu_inner_blend_arm.h"
 #include "gpu_inner_light_arm.h"
@@ -315,7 +315,7 @@ static noinline void gpuTileDriverFn(le16_t *pDst, u16 data, u32 count,
 	}
 }
 
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
 
 template<int CF>
 static void TileAsm(le16_t *pDst, u16 data, u32 count, const gpu_unai_inner_t &inn)
@@ -347,12 +347,12 @@ typedef void (*PT)(le16_t *pDst, u16 data, u32 count, const gpu_unai_inner_t &in
 // Template instantiation helper macros
 #define TI(cf) gpuTileDriverFn<(cf)>
 #define TN     TileNULL
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
 #define TA(cf) TileAsm<(cf)>
 #else
 #define TA(cf) TI(cf)
 #endif
-#ifdef HAVE_ARMV6
+#if defined(HAVE_ARMV6) && defined(GPU_UNAI_ARM_ASM)
 #define TA6(cf) TileAsm<(cf)>
 #else
 #define TA6(cf) TI(cf)
@@ -446,7 +446,7 @@ endsprite:
 	}
 }
 
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
 
 template<int CF>
 static void SpriteMaybeAsm(le16_t *pPixel, u32 count, const u8 *pTxt_base,
@@ -483,7 +483,7 @@ static void SpriteMaybeAsm(le16_t *pPixel, u32 count, const u8 *pTxt_base,
 #endif
   gpuSpriteDriverFn<CF>(pPixel, count, pTxt_base, inn);
 }
-#endif // __arm__
+#endif // GPU_UNAI_ARM_ASM
 
 static void SpriteNULL(le16_t *pPixel, u32 count, const u8 *pTxt_base,
 	const gpu_unai_inner_t &inn)
@@ -501,12 +501,12 @@ static void SpriteNULL(le16_t *pPixel, u32 count, const u8 *pTxt_base,
 // Template instantiation helper macros
 #define TI(cf) gpuSpriteDriverFn<(cf)>
 #define TN     SpriteNULL
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
 #define TA(cf) SpriteMaybeAsm<(cf)>
 #else
 #define TA(cf) TI(cf)
 #endif
-#ifdef HAVE_ARMV6
+#if defined(HAVE_ARMV6) && defined(GPU_UNAI_ARM_ASM)
 #define TA6(cf) SpriteMaybeAsm<(cf)>
 #else
 #define TA6(cf) TI(cf)
@@ -742,7 +742,7 @@ endpolytext:
 	}
 }
 
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
 template<int CF>
 static void PolySpanMaybeAsm(const gpu_unai_t &gpu_unai, le16_t *pDst, u32 count, s32 y)
 {
@@ -797,12 +797,12 @@ typedef void (*PP)(const gpu_unai_t &gpu_unai, le16_t *pDst, u32 count, s32 y);
 // Template instantiation helper macros
 #define TI(cf) gpuPolySpanFn<(cf)>
 #define TN     PolyNULL
-#ifdef __arm__
+#ifdef GPU_UNAI_ARM_ASM
 #define TA(cf) PolySpanMaybeAsm<(cf)>
 #else
 #define TA(cf) TI(cf)
 #endif
-#ifdef HAVE_ARMV6
+#if defined(HAVE_ARMV6) && defined(GPU_UNAI_ARM_ASM)
 #define TA6(cf) PolySpanMaybeAsm<(cf)>
 #else
 #define TA6(cf) TI(cf)

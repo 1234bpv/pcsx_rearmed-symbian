@@ -222,7 +222,9 @@ static inline void textured_sprite(int &cpu_cycles_sum, int &cpu_cycles)
   if (need_lighting(le32_raw(gpu_unai.PacketBuffer.U4[0])))
     driver_idx |= Lighting;
   PS driver = gpuSpriteDrivers[driver_idx];
-  PtrUnion packet = { .ptr = (void*)&gpu_unai.PacketBuffer };
+  // designated initialisers are not available in C++ before GCC 4.7
+  PtrUnion packet;
+  packet.ptr = (void*)&gpu_unai.PacketBuffer;
   gpuDrawS(packet, driver, &w, &h);
   gput_sum(cpu_cycles_sum, cpu_cycles, gput_sprite(w, h));
 }
@@ -257,7 +259,8 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
     for (i = 1; i <= len; i++)
       gpu_unai.PacketBuffer.U4[i] = list[i];
 
-    PtrUnion packet = { .ptr = (void*)&gpu_unai.PacketBuffer };
+    PtrUnion packet;
+    packet.ptr = (void*)&gpu_unai.PacketBuffer;
 
     switch (cmd)
     {

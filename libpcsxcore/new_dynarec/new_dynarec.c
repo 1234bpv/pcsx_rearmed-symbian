@@ -6722,6 +6722,10 @@ void new_dynarec_init(void)
     SysPrintf("ndrc_symbian_alloc(%d) failed\n", (int)sizeof(*ndrc));
     abort();
   }
+  // Same reason as the libnx branch above: only MAP_ANONYMOUS guarantees zeroed
+  // pages, and get_trampoline() finds a free slot by comparing against NULL.
+  // Without this the table looks full on the very first compiled block.
+  memset(&ndrc->tramp, 0, sizeof(ndrc->tramp));
   #else
   uintptr_t desired_addr = 0;
   int prot = PROT_READ | PROT_WRITE | PROT_EXEC;

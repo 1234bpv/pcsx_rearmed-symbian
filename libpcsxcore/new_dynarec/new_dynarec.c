@@ -9616,7 +9616,11 @@ static void block_info_finish(const struct compile_state *st,
 
 static int noinline new_recompile_block(u_int addr)
 {
-  struct compile_state st;
+  // Not on the stack: the four MAXBLOCK arrays inside make it about 64K, and
+  // Symbian caps a thread stack well below that. The recompiler is already
+  // single-threaded and non-reentrant - dops[], cinfo[], regs[] and the other
+  // per-block tables are file-scope for the same reason.
+  static struct compile_state st;
   u_int pagelimit = 0;
   u_int state_rflags = 0;
   int i;

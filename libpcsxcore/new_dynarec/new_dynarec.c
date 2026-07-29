@@ -472,6 +472,7 @@ static void do_store_smc_check(struct compile_state *st, int i,
 static void pass_args(int a0, int a1);
 static void emit_far_jump(const void *f);
 static void emit_far_call(const void *f);
+static void *get_trampoline(const void *f);
 
 // linux perf jit dump support:
 // perf record -k CLOCK_MONOTONIC ...
@@ -1690,22 +1691,6 @@ static void emit_far_call(const void *f)
   f = get_trampoline(f);
   emit_call(f);
 }
-
-#ifdef INVALIDATE_USE_COND_CALL
-// invalidate_addr_reg[] points into linkage_arm.S, so on allocators that hand
-// out a translation cache far from the executable it is out of BL range and
-// genjmp() aborts. The trampoline lives inside ndrc, hence always reachable.
-static void emit_far_callne(const void *f)
-{
-  if (can_jump_or_call(f)) {
-    emit_callne(f);
-    return;
-  }
-
-  f = get_trampoline(f);
-  emit_callne(f);
-}
-#endif
 
 // Check if an address is already compiled
 static void *check_addr(u_int vaddr)
@@ -3674,7 +3659,7 @@ static void do_store_smc_check(struct compile_state *st, int i,
 #ifdef INVALIDATE_USE_COND_CALL
   if (count == 1) {
     emit_cmpimm(HOST_TEMPREG, 1);
-    emit_far_callne(invalidate_addr_reg[addr_hr]);
+    emit_callne(invalidate_addr_reg[addr_hr]);
     host_tempreg_release();
     return;
   }

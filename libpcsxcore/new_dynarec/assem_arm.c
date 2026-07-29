@@ -263,7 +263,16 @@ static u_int genjmp(u_int addr)
   if (addr < 3) return 0; // a branch that will be patched later
   int offset = addr-(int)out-8;
   if (offset < -33554432 || offset >= 33554432) {
-    SysPrintf("genjmp: out of range: %08x\n", offset);
+    // Allocators that cannot pick an address (RChunk on Symbian) put the
+    // translation cache gigabytes away from the executable, far outside B/BL
+    // reach. Routing through the trampoline table here covers every emitter -
+    // including the conditional forms, which have no emit_far_* counterpart.
+    addr = (u_int)get_trampoline((void *)addr);
+    offset = addr-(int)out-8;
+  }
+  if (offset < -33554432 || offset >= 33554432) {
+    SysPrintf("genjmp: out of range: target %08x out %p offset %08x\n",
+      addr, out, offset);
     abort();
     return 0;
   }

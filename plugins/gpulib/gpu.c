@@ -33,6 +33,11 @@ unsigned int g_gpulibWriteData, g_gpulibWriteDataMem, g_gpulibDmaChain;
 unsigned int g_gpulibDmaWords, g_gpulibWriteStatus, g_gpulibReadStatus;
 unsigned int g_gpulibStatusLast;
 
+// Профілювання растеризації: скільки часу gpu_unai малює у VRAM. Хук
+// ndrc_symbian_fastcount - високороздільний лічильник (ndrc_mem_symbian.cpp).
+extern unsigned int ndrc_symbian_fastcount(void);
+unsigned long long g_gpulibRenderTicks;
+
 static noinline int do_cmd_buffer(struct psx_gpu *gpu, uint32_t *data, int count,
     int *cycles_sum, int *cycles_last);
 static noinline void finish_vram_transfer(struct psx_gpu *gpu, int is_read, int is_async);
@@ -943,6 +948,7 @@ void GPUwriteDataMem(uint32_t *mem, int count)
   g_gpulibDmaWords += count;
   log_io(&gpu, "gpu_dma_write %p %d cached %d\n", mem, count, gpu.cmd_len);
 
+  const unsigned int _rt0 = ndrc_symbian_fastcount();
   if (unlikely(gpu.cmd_len > 0))
     flush_cmd_buffer(&gpu);
 
@@ -951,6 +957,7 @@ void GPUwriteDataMem(uint32_t *mem, int count)
     log_anomaly(&gpu, "GPUwriteDataMem: discarded %d/%d words\n", left, count);
 
   sync_ecmds_status_bits(&gpu);
+  g_gpulibRenderTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);
 }
 
 void GPUwriteData(uint32_t data)
@@ -973,6 +980,7 @@ long GPUdmaChain(uint32_t *rambase, uint32_t start_addr,
   int cpu_cycles_last = 0;
 
   g_gpulibDmaChain++;
+  const unsigned int _rt0 = ndrc_symbian_fastcount();
   preload(rambase + (start_addr & 0x1fffff) / 4);
 
   if (unlikely(gpu.cmd_len > 0))
@@ -1041,6 +1049,7 @@ long GPUdmaChain(uint32_t *rambase, uint32_t start_addr,
   if (progress_addr)
     *progress_addr = addr;
   *cycles_last_cmd = cpu_cycles_last;
+  g_gpulibRenderTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);
   return cpu_cycles_sum;
 }
 

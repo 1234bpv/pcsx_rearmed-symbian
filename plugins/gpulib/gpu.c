@@ -28,6 +28,11 @@
 
 struct psx_gpu gpu;
 
+// diagnostic draw counters (symbian bios-boot investigation)
+unsigned int g_gpulibWriteData, g_gpulibWriteDataMem, g_gpulibDmaChain;
+unsigned int g_gpulibDmaWords, g_gpulibWriteStatus, g_gpulibReadStatus;
+unsigned int g_gpulibStatusLast;
+
 static noinline int do_cmd_buffer(struct psx_gpu *gpu, uint32_t *data, int count,
     int *cycles_sum, int *cycles_last);
 static noinline void finish_vram_transfer(struct psx_gpu *gpu, int is_read, int is_async);
@@ -378,6 +383,8 @@ void GPUwriteStatus(uint32_t data)
   uint32_t cmd = data >> 24;
   uint32_t fb_dirty = 1, frame;
   int src_x, src_y, changed;
+
+  g_gpulibWriteStatus++;
 
   if (cmd < ARRAY_SIZE(gpu.regs)) {
     if (cmd > 1 && cmd != 5 && gpu.regs[cmd] == data)
@@ -932,6 +939,8 @@ void GPUwriteDataMem(uint32_t *mem, int count)
 {
   int dummy = 0, left;
 
+  g_gpulibWriteDataMem++;
+  g_gpulibDmaWords += count;
   log_io(&gpu, "gpu_dma_write %p %d cached %d\n", mem, count, gpu.cmd_len);
 
   if (unlikely(gpu.cmd_len > 0))
@@ -946,6 +955,7 @@ void GPUwriteDataMem(uint32_t *mem, int count)
 
 void GPUwriteData(uint32_t data)
 {
+  g_gpulibWriteData++;
   log_io(&gpu, "gpu_write %08x\n", data);
   gpu.cmd_buffer[gpu.cmd_len++] = HTOLE32(data);
   if (gpu.cmd_len >= CMD_BUFFER_LEN) {
@@ -962,6 +972,7 @@ long GPUdmaChain(uint32_t *rambase, uint32_t start_addr,
   int cpu_cycles_sum = 0;
   int cpu_cycles_last = 0;
 
+  g_gpulibDmaChain++;
   preload(rambase + (start_addr & 0x1fffff) / 4);
 
   if (unlikely(gpu.cmd_len > 0))
@@ -1076,6 +1087,8 @@ uint32_t GPUreadStatus(void)
   }
 
   ret = gpu.status;
+  g_gpulibReadStatus++;
+  g_gpulibStatusLast = ret;
   log_io(&gpu, "gpu_read_status %08x\n", ret);
   return ret;
 }

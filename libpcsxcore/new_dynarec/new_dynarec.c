@@ -440,6 +440,17 @@ void *ndrc_get_addr_ht(u_int vaddr, struct ht_entry *ht);
 void ndrc_write_invalidate_one(u_int addr);
 static void ndrc_write_invalidate_many(u_int addr, u_int end);
 
+#ifdef __SYMBIAN32__
+// Слід для чорної скриньки оболонки: який гостьовий блок і який прохід зараз
+// компілюються. Нуль у ndrc_dbg_pass = рекомпілятор не працює. Обробник виключень
+// на цьому апараті не викликається, тож стан має лежати там, де його прочитає
+// сусідній потік - у глобальній пам'яті, а не на стеку.
+u_int ndrc_dbg_addr, ndrc_dbg_pass, ndrc_dbg_i, ndrc_dbg_slen, ndrc_dbg_out;
+#define NDRC_DBG_PASS(n) (ndrc_dbg_pass = (n))
+#else
+#define NDRC_DBG_PASS(n)
+#endif
+
 static int new_recompile_block(u_int addr);
 static void invalidate_block(struct block_info *block);
 static void block_clear_jump_outs(struct block_info *block, int unlink);
@@ -772,6 +783,9 @@ static void *start_tcache_write_reserve(u_int max_space)
     out = ndrc->translation_cache;
     end = out + max_space;
     perf_dump_wrap();
+    // Витіснення блоків трапляється рідко, а зачіпає рівно ті шляхи, які на
+    // Symbian вимагають IMB_Range. Мітка в лозі показує, чи воно взагалі було.
+    SysPrintf("tc wrap\n");
   }
   // we do a bit more than requested to avoid large jump and lots of
   // expirations the moment we wrap
@@ -1996,9 +2010,13 @@ void ndrc_patch_link(u_int vaddr, void *insn, void *stub, void *target)
   set_jump_target_far1(insn, target);
   ndrc_add_jump_out(vaddr, stub);
 
-#if defined(__aarch64__) || defined(NO_WRITE_EXEC)
+#if defined(__aarch64__) || defined(NO_WRITE_EXEC) || defined(__SYMBIAN32__)
   // arm64: no syscall concerns, dyna_linker lacks stale detection
   // w^x: have to do costly permission switching anyway
+  // symbian: ARM1136 has a non-coherent I-cache, and the kernel requires
+  // IMB_Range after writing code - executing a half-patched branch faults with
+  // KERN-EXEC 3. Skipping the flush here is safe on ARM Linux only because a
+  // stale fetch merely re-enters dyna_linker; that does not hold on this core.
   new_dyna_clear_cache(NDRC_WRITE_OFFSET(insn), NDRC_WRITE_OFFSET(insn_end));
 #endif
   //end_tcache_write(insn, insn_end, 1);
@@ -9652,6 +9670,13 @@ static int noinline new_recompile_block(u_int addr)
   st.start = addr;
   st.slen = 0;
   st.linkcount = 0;
+#ifdef __SYMBIAN32__
+  ndrc_dbg_addr = addr;
+  ndrc_dbg_pass = 0;
+  ndrc_dbg_i = 0;
+  ndrc_dbg_slen = 0;
+  ndrc_dbg_out = (u_int)out;
+#endif
   ndrc_g.did_compile++;
   if (Config.HLE && st.start == 0x80001000) // hlecall
   {
@@ -9719,33 +9744,43 @@ static int noinline new_recompile_block(u_int addr)
 
   /* Pass 1 disassembly */
 
+  NDRC_DBG_PASS(1);
   pass1a_disassemble(&st, pagelimit);
   pass1b_bt(&st);
+#ifdef __SYMBIAN32__
+  ndrc_dbg_slen = st.slen;
+#endif
 
   int clear_hack_addr = apply_hacks(&st);
 
   /* Pass 2 - unneeded, register dependencies */
 
+  NDRC_DBG_PASS(2);
   pass2a_unneeded(&st);
   pass2b_unneeded_regs(&st, 0, st.slen-1, 0);
 
   /* Pass 3 - Register allocation */
 
+  NDRC_DBG_PASS(3);
   pass3_register_alloc(&st, addr);
 
   /* Pass 4 - Cull unused host registers */
 
+  NDRC_DBG_PASS(4);
   pass4_cull_unused_regs(&st);
 
   /* Pass 5 - Pre-allocate registers */
 
+  NDRC_DBG_PASS(5);
   pass5a_preallocate1(&st);
   pass5b_preallocate2(&st);
 
   /* Pass 6 - Optimize clean/dirty state */
+  NDRC_DBG_PASS(6);
   pass6_clean_registers(&st, 0, st.slen - 1);
 
   /* Pass 7 */
+  NDRC_DBG_PASS(7);
   for (i = st.slen - 1; i >= 0; i--)
   {
     if(dops[i].itype==CJUMP||dops[i].itype==SJUMP)
@@ -9760,6 +9795,7 @@ static int noinline new_recompile_block(u_int addr)
   }
 
   /* Pass 8 - Assembly */
+  NDRC_DBG_PASS(8);
   st.linkcount = 0;
   stubcount = 0;
   st.is_delayslot = 0;
@@ -9967,9 +10003,15 @@ static int noinline new_recompile_block(u_int addr)
 #endif
 
   /* Pass 9 - Linker */
+  NDRC_DBG_PASS(9);
   u_int jump_out_count = 0;
   for (i = 0; i < st.linkcount; i++)
   {
+#ifdef __SYMBIAN32__
+    ndrc_dbg_i = i;             // на проході 9 це індекс переходу, не інструкції
+    ndrc_dbg_slen = st.linkcount;
+    ndrc_dbg_out = (u_int)out;
+#endif
     assem_debug("link: %p -> %08x\n",
       log_addr(st.link_addr[i].addr), st.link_addr[i].target);
     literal_pool(64);
@@ -10054,6 +10096,7 @@ static int noinline new_recompile_block(u_int addr)
   fflush(stdout);
 #endif
   stat_inc(stat_bc_direct);
+  NDRC_DBG_PASS(0);   // нуль = рекомпілятор не працює; інакше слід не відрізнити від залишку
   return 0;
 }
 

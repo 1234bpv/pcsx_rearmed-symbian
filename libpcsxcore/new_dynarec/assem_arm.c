@@ -2002,11 +2002,13 @@ static void c2op_call_MACtoIR(int lm, int need_flags, enum MACtoIRflagMode fmode
 static void c2op_call_rgb_func(void *func,int lm,int need_ir,int need_flags)
 {
   emit_far_call(func);
-  if (need_flags || need_ir) {
-    // func is C code and trashes r0
-    emit_addimm(FP, (char *)&psxRegs.CP2D.r[0] - (char *)&dynarec_local, 0);
+  // func is C code and trashes r0. Відновлювати вказівник треба БЕЗУМОВНО:
+  // gteMACtoRGB нижче викликається завжди, а не лише в цій гілці, і без цього
+  // отримує в r0 повернене значення func. Коли ні прапорці, ні IR не потрібні,
+  // це давало r0=0xa0 (сам зсув від нульової бази) і збій на першому ж ldr.
+  emit_addimm(FP, (char *)&psxRegs.CP2D.r[0] - (char *)&dynarec_local, 0);
+  if (need_flags || need_ir)
     c2op_call_MACtoIR(lm, need_flags, fm_load);
-  }
   emit_far_call(need_flags ? gteMACtoRGB : gteMACtoRGB_nf);
 }
 

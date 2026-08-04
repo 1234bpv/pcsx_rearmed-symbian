@@ -964,11 +964,16 @@ void GPUwriteData(uint32_t data)
 {
   g_gpulibWriteData++;
   log_io(&gpu, "gpu_write %08x\n", data);
+  // Третій вхід растеризації. Довго лишався незаміряним, і з того, що викликів
+  // тут удесятеро більше, ніж у GPUwriteDataMem, зробили висновок, ніби лічильник
+  // занижує вдвічі. Виклики не рівні: сюди приходить ОДНЕ слово, туди - тисячі.
+  const unsigned int _rt0 = ndrc_symbian_fastcount();
   gpu.cmd_buffer[gpu.cmd_len++] = HTOLE32(data);
   if (gpu.cmd_len >= CMD_BUFFER_LEN) {
     flush_cmd_buffer(&gpu);
     sync_ecmds_status_bits(&gpu);
   }
+  g_gpulibRenderTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);
 }
 
 long GPUdmaChain(uint32_t *rambase, uint32_t start_addr,

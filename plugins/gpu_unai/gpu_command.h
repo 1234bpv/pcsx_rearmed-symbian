@@ -26,6 +26,9 @@
 void gpuSetTexture(u16 tpage)
 {
 	u32 tmode, tx, ty;
+	// Ранній вихід за незмінним tpage тут НЕ робити: GP0(E2) кличе цю функцію саме
+	// як gpuSetTexture(gpu_unai.GPU_GP1), тобто порівняння було б значення із собою,
+	// завжди спрацьовувало б і губило перерахунок після зміни текстурного вікна.
 	gpu_unai.GPU_GP1 = (gpu_unai.GPU_GP1 & ~0x1FF) | (tpage & 0x1FF);
 	gpu_unai.TextureWindow[0]&= ~gpu_unai.TextureWindow[2];
 	gpu_unai.TextureWindow[1]&= ~gpu_unai.TextureWindow[3];

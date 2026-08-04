@@ -60,6 +60,20 @@
 #define IS_OLD_RENDERER() false
 #endif
 
+// Налаштування растеризатора для оболонок, які не викликають GPUrearmedCallbacks.
+// Без цього gpu_unai_config_ext лишається нульовою: не лише вимкнені hack-и, а й
+// освітлення з напівпрозорістю, тобто текстури малюються без модуляції.
+// Викликати ДО renderer_init - саме там конфіг копіюється у робочу структуру.
+extern "C" void gpu_unai_set_config(int pixel_skip, int ilace_force,
+                                    int lighting, int fast_lighting, int blending)
+{
+  gpu_unai_config_ext.pixel_skip    = pixel_skip ? 1 : 0;
+  gpu_unai_config_ext.ilace_force   = ilace_force & 7;
+  gpu_unai_config_ext.lighting      = lighting ? 1 : 0;
+  gpu_unai_config_ext.fast_lighting = fast_lighting ? 1 : 0;
+  gpu_unai_config_ext.blending      = blending ? 1 : 0;
+}
+
 int renderer_init(void)
 {
   memset((void*)&gpu_unai, 0, sizeof(gpu_unai));

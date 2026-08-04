@@ -75,6 +75,27 @@ INLINE float FloatInv(const float x)
 ///////////////////////////////////////////////////////////////////////////
 // --- BEGIN INVERSE APPROXIMATION SECTION ---
 ///////////////////////////////////////////////////////////////////////////
+#ifdef GPU_UNAI_USE_YDIV_TABLE
+// Ділення на різницю Y у setup-і полігона. polyUseTriangle відкидає трикутник
+// заввишки >= CHKMAX_Y, а завширшки >= CHKMAX_X, тож тут |d| < 512 і
+// |n| <= 1023 << FIXED_BITS < 2^20. За цих меж множення на ceil(2^29/d) дає
+// БІТ-У-БІТ той самий результат, що й ділення: похибка < 2^20/2^29 = 1/512 <= 1/|d|.
+// Відміна від GPU_UNAI_USE_INT_DIV_MULTINV: таблиця на 2 КБ (а не 256 КБ проти
+// 16-КБ кеша даних) і результат точний, а не з похибкою 2^-15.
+#define GPU_YDIV_BITS 29
+s32 s_yRecip[CHKMAX_Y];
+
+INLINE fixed GPU_DIV_Y(s32 n, s32 d)
+{
+	u32 un = (n < 0) ? (u32)(-n) : (u32)n;
+	u32 ud = (d < 0) ? (u32)(-d) : (u32)d;
+	u32 q  = (u32)(((u64)un * (u32)s_yRecip[ud]) >> GPU_YDIV_BITS);
+	return ((n ^ d) < 0) ? -(fixed)q : (fixed)q;
+}
+#else
+#define GPU_DIV_Y(n, d) GPU_FAST_DIV((n), (d))
+#endif
+
 #if defined(GPU_UNAI_USE_INT_DIV_MULTINV) || (!defined(GPU_UNAI_NO_OLD) && !defined(GPU_UNAI_USE_FLOATMATH))
 
 //  big precision inverse table.

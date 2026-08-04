@@ -113,6 +113,13 @@ int renderer_init(void)
   }
 #endif
 
+#ifdef GPU_UNAI_USE_YDIV_TABLE
+  // ceil(2^29/d); [0] не адресується охоронними перевірками на нульову висоту
+  s_yRecip[0] = 0;
+  for (int d = 1; d < CHKMAX_Y; ++d)
+    s_yRecip[d] = (s32)((((u32)1 << GPU_YDIV_BITS) + d - 1) / (u32)d);
+#endif
+
   SetupLightLUT();
   SetupDitheringConstants();
 

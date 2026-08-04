@@ -74,6 +74,15 @@ extern "C" void gpu_unai_set_config(int pixel_skip, int ilace_force,
   gpu_unai_config_ext.blending      = blending ? 1 : 0;
 }
 
+// Те саме, але вже після renderer_init: копіює конфіг у робочу структуру, щоб
+// зміна з меню діяла без перезапуску. Дзеркалить рядки renderer_init нижче -
+// правити треба обидва місця.
+extern "C" void gpu_unai_apply_config(void)
+{
+  gpu_unai.config = gpu_unai_config_ext;
+  gpu_unai.inn.ilace_mask = gpu_unai.config.ilace_force;
+}
+
 int renderer_init(void)
 {
   memset((void*)&gpu_unai, 0, sizeof(gpu_unai));

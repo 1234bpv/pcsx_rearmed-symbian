@@ -94,6 +94,20 @@ static struct {
 static int (*cdimg_read_func)(FILE *f, unsigned int base, void *dest, int sector);
 static int (*cdimg_read_sub_func)(FILE *f, int sector, void *dest);
 
+#ifdef __SYMBIAN32__
+// Одна точка заміру для всіх форматів образу, щоб .bin і стиснені порівнювались
+// однією міркою: читання з картки і inflate разом.
+extern unsigned int ndrc_symbian_fastcount(void);
+unsigned long long g_cdReadTicks;
+unsigned int g_cdReadCount;
+#define CDREAD_TICK_BEGIN { unsigned int t0_ = ndrc_symbian_fastcount();
+#define CDREAD_TICK_END   g_cdReadTicks += (unsigned int)(ndrc_symbian_fastcount() - t0_); \
+                          g_cdReadCount++; }
+#else
+#define CDREAD_TICK_BEGIN
+#define CDREAD_TICK_END
+#endif
+
 static void DecodeRawSubData(unsigned char *subbuffer);
 
 struct trackinfo {
@@ -975,8 +989,11 @@ static int handlecbin(const char *isofile) {
 	if (index_table == NULL)
 		goto fail_io;
 
-	ret = fread(index_table, sizeof(index_table[0]), compr_img->index_len, cdHandle);
-	if (ret != compr_img->index_len) {
+	// index_len + 1: the loop below reads one entry past index_len to bound the
+	// last block, and reading only index_len left that one uninitialized, so the
+	// final block's size came out garbage and its read failed.
+	ret = fread(index_table, sizeof(index_table[0]), compr_img->index_len + 1, cdHandle);
+	if (ret != compr_img->index_len + 1) {
 		SysPrintf("failed to read index table\n");
 		goto fail_index;
 	}
@@ -1703,7 +1720,9 @@ int ISOreadTrack(const unsigned char *time, void *buf)
 
 	sector -= 2 * 75;
 
+	CDREAD_TICK_BEGIN
 	ret = cdimg_read_func(cdHandle, 0, buf, sector);
+	CDREAD_TICK_END
 	if (ret < 12*2 + 2048)
 		return -1;
 

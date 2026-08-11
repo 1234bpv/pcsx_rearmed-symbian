@@ -20,6 +20,12 @@
 
 #include "mdec.h"
 
+// Профілювання MDEC: час декодування відео (rl2blk + IDCT + yuv2rgb) і обсяг
+// вихідних даних. Хук той самий, що для растеризації в gpulib.
+extern unsigned int ndrc_symbian_fastcount(void);
+unsigned long long g_mdecDecodeTicks;
+unsigned int g_mdecWords;
+
 /* memory speed is 1 byte per MDEC_BIAS psx clock
  * That mean (PSXCLK / MDEC_BIAS) B/s
  * MDEC_BIAS = 2.0 => ~16MB/s
@@ -567,6 +573,7 @@ void psxDma1(u32 adr, u32 bcr, u32 chcr) {
 	int blk[DSIZE2 * 6];
 	u8 * image;
 	int size;
+	unsigned int _rt0;
 
 	if (chcr != 0x01000200) {
 		log_unhandled("mdec1: invalid dma %08x\n", chcr);
@@ -593,6 +600,9 @@ void psxDma1(u32 adr, u32 bcr, u32 chcr) {
 		HW_DMA1_CHCR &= SWAP32(~0x01000000);
 		return;
 	}
+
+	_rt0 = ndrc_symbian_fastcount();
+	g_mdecWords += words;
 
 	if (mdec.reg0 & MDEC0_RGB24) {
 		/* 16 bits decoding
@@ -652,6 +662,8 @@ void psxDma1(u32 adr, u32 bcr, u32 chcr) {
 			mdec.block_buffer_pos = mdec.block_buffer + size;
 		}
 	}
+	g_mdecDecodeTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);
+
 	if (size < 0)
 		log_unhandled("mdec: bork\n");
 	

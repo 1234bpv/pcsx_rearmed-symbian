@@ -78,6 +78,40 @@ extern "C" void gpu_unai_set_config(int pixel_skip, int ilace_force,
 gpu_unai_primstats_t gpu_unai_primstats;
 u32 gpu_unai_primstats_cur;
 
+// Множина текстурних станів поточного кадру, відкрита адресація. Замість
+// очищення таблиці на межі кадру кожен запис несе номер кадру, тож перехід до
+// наступного - це інкремент лічильника.
+#define PRIMSTAT_TEXSLOTS 512
+static u32 ps_tex_key[PRIMSTAT_TEXSLOTS], ps_tex_gen[PRIMSTAT_TEXSLOTS];
+static u32 ps_tp_key[PRIMSTAT_TEXSLOTS], ps_tp_gen[PRIMSTAT_TEXSLOTS];
+static u32 ps_gen = 1;
+static u32 ps_cnt_tex, ps_cnt_tp;
+static u32 ps_last_tex, ps_last_tp;
+
+// 1, якщо ключ у цьому кадрі вже траплявся; інакше запам'ятовує і віддає 0.
+static int primstat_seen(u32 *tab, u32 *gen, u32 key)
+{
+  u32 h = (key * 0x9E3779B1u) >> 23;
+  for (u32 n = 0; n < PRIMSTAT_TEXSLOTS; n++) {
+    u32 s = (h + n) & (PRIMSTAT_TEXSLOTS - 1);
+    if (gen[s] != ps_gen) { gen[s] = ps_gen; tab[s] = key; return 0; }
+    if (tab[s] == key) return 1;
+  }
+  return 1;  // таблиця повна: не рахуємо як новий, щоб не завищити
+}
+
+// Межа кадру. Знає її лише оболонка, тому вона це й кличе.
+extern "C" void gpu_unai_primstats_frame(void)
+{
+  gpu_unai_primstats.sum_tex += ps_cnt_tex;
+  gpu_unai_primstats.sum_tp  += ps_cnt_tp;
+  if (ps_cnt_tex > gpu_unai_primstats.max_tex)
+    gpu_unai_primstats.max_tex = ps_cnt_tex;
+  ps_cnt_tex = ps_cnt_tp = 0;
+  ps_last_tex = ps_last_tp = 0;
+  ps_gen++;
+}
+
 // Віддає лічильники як масив u32 у порядку оголошення полів структури; форматує
 // оболонка. Так тут не потрібен snprintf - Symbian-libc його не оголошує.
 extern "C" int gpu_unai_get_primstats(unsigned *out, int max)
@@ -757,6 +791,26 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
       // (біт 1 коду команди) - решта в GL не потребує blend взагалі.
       if ((cmd & 2) && cmd >= 0x20 && cmd <= 0x7f)
         gpu_unai_primstats.blend_mode[(gpu_unai.BLEND_MODE >> 3) & 3]++;
+      // Текстурний стан. Читається саме тут, після обробника пакета: сторінку й
+      // CLUT ставлять gpuSetTexture/gpuSetCLUT усередині нього.
+      // Лінії з діапазону виключено навмисно: у них біт 2 означає не текстуру, а
+      // нічого, і полічити їх як текстуровані було б хибою.
+      if ((cmd & 4) && ((cmd >= 0x20 && cmd <= 0x3f) || (cmd >= 0x60 && cmd <= 0x7f))) {
+        u32 tba = (u32)(gpu_unai.inn.TBA - gpu_unai.vram);
+        u32 tp  = (tba * 0x9E3779B1u) ^ ((u32)gpu_unai.TEXT_MODE * 0xC2B2AE35u);
+        u32 tk  = tp;
+        // У 16-бітному режимі CLUT не читається, і його поточне значення до
+        // текстури не належить - інакше лічильник роздувся б на порожньому місці.
+        if (gpu_unai.TEXT_MODE != (3 << 5)) {
+          u32 cba = (u32)(gpu_unai.inn.CBA - gpu_unai.vram) >> 4;
+          tk ^= cba * 0x85EBCA6Bu;
+        }
+        gpu_unai_primstats.n_textured++;
+        if (tk != ps_last_tex) { gpu_unai_primstats.n_texchange++; ps_last_tex = tk; }
+        if (tp != ps_last_tp)  { gpu_unai_primstats.n_tpchange++;  ps_last_tp = tp; }
+        if (!primstat_seen(ps_tex_key, ps_tex_gen, tk)) ps_cnt_tex++;
+        if (!primstat_seen(ps_tp_key, ps_tp_gen, tp))   ps_cnt_tp++;
+      }
     }
 #endif
   }

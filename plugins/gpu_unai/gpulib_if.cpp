@@ -74,6 +74,23 @@ extern "C" void gpu_unai_set_config(int pixel_skip, int ilace_force,
   gpu_unai_config_ext.blending      = blending ? 1 : 0;
 }
 
+#ifdef GPU_UNAI_PRIMSTATS
+gpu_unai_primstats_t gpu_unai_primstats;
+u32 gpu_unai_primstats_cur;
+
+// Віддає лічильники як масив u32 у порядку оголошення полів структури; форматує
+// оболонка. Так тут не потрібен snprintf - Symbian-libc його не оголошує.
+extern "C" int gpu_unai_get_primstats(unsigned *out, int max)
+{
+  const u32 *p = (const u32 *)&gpu_unai_primstats;
+  int n = (int)(sizeof(gpu_unai_primstats) / sizeof(u32));
+  if (n > max) n = max;
+  for (int i = 0; i < n; i++)
+    out[i] = p[i];
+  return n;
+}
+#endif
+
 // Те саме, але вже після renderer_init: копіює конфіг у робочу структуру, щоб
 // зміна з меню діяла без перезапуску. Дзеркалить рядки renderer_init нижче -
 // правити треба обидва місця.
@@ -696,6 +713,52 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
         gpuGP0Cmd_0xEx(gpu_unai, cmd_word);
       } break;
     }
+#ifdef GPU_UNAI_PRIMSTATS
+    // Растеризатор коду команди вже не бачить, тому площу, яку він накопичив у
+    // gpu_unai_primstats_cur, розкладає по класах саме тут. Лінії площею не
+    // враховуються - у них десяток місць виклику драйвера, а частка мізерна;
+    // рахуємо лише штуки.
+    {
+      u32 px = gpu_unai_primstats_cur;
+      gpu_unai_primstats_cur = 0;
+      if (cmd >= 0x20 && cmd <= 0x3f) {
+        // Клас визначають лише два біти коду: 0x04 - текстурований,
+        // 0x10 - Gouraud. Біт 0x08 (квад проти трикутника) на клас не впливає.
+        switch (cmd & 0x14) {
+        case 0x00: gpu_unai_primstats.pix_poly_f  += px;
+                   gpu_unai_primstats.n_poly_f++;  break;
+        case 0x04: gpu_unai_primstats.pix_poly_ft += px;
+                   gpu_unai_primstats.n_poly_ft++; break;
+        case 0x10: gpu_unai_primstats.pix_poly_g  += px;
+                   gpu_unai_primstats.n_poly_g++;  break;
+        default:   gpu_unai_primstats.pix_poly_gt += px;
+                   gpu_unai_primstats.n_poly_gt++; break;
+        }
+        u32 b = 0;
+        if      (px >= 4096) b = 5;
+        else if (px >= 1024) b = 4;
+        else if (px >=  256) b = 3;
+        else if (px >=   64) b = 2;
+        else if (px >=   16) b = 1;
+        gpu_unai_primstats.area_bucket[b]++;
+      }
+      else if (cmd >= 0x60 && cmd <= 0x7f) {
+        gpu_unai_primstats.pix_sprite += px;
+        gpu_unai_primstats.n_sprite++;
+      }
+      else if (cmd >= 0x40 && cmd <= 0x5f)
+        gpu_unai_primstats.n_line++;
+      else if (cmd == 0x02) {
+        gpu_unai_primstats.pix_fill += (u32)(le16_to_s16(packet.U2[4]) & 0x3ff)
+                                     * (u32)(le16_to_s16(packet.U2[5]) & 0x1ff);
+        gpu_unai_primstats.n_fill++;
+      }
+      // Режим напівпрозорості рахуємо лише для примітивів, у яких вона ввімкнена
+      // (біт 1 коду команди) - решта в GL не потребує blend взагалі.
+      if ((cmd & 2) && cmd >= 0x20 && cmd <= 0x7f)
+        gpu_unai_primstats.blend_mode[(gpu_unai.BLEND_MODE >> 3) & 3]++;
+    }
+#endif
   }
 
 breakloop:

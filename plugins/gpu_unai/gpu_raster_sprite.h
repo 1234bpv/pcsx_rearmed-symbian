@@ -60,6 +60,7 @@ void gpuDrawS(PtrUnion packet, const PS gpuSpriteDriver, s32 *w_out, s32 *h_out)
 	if (x1 <= 0) return;
 	*w_out = x1;
 	*h_out = y1 - y0;
+	PRIMSTAT_SPAN(x1 * (y1 - y0));
 
 	le16_t *Pixel = &gpu_unai.vram[FRAME_OFFSET(x0, y0)];
 
@@ -103,6 +104,7 @@ void gpuDrawT(PtrUnion packet, const PT gpuTileDriver, s32 *w_out, s32 *h_out)
 	if (x1 <= 0) return;
 	*w_out = x1;
 	*h_out = y1 - y0;
+	PRIMSTAT_SPAN(x1 * (y1 - y0));
 
 	const u16 Data = GPU_RGB16(le32_to_u32(packet.U4[0]));
 	le16_t *Pixel = &gpu_unai.vram[FRAME_OFFSET(x0, y0)];

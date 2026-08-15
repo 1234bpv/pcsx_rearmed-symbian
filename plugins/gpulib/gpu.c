@@ -581,6 +581,13 @@ static int do_vram_io(struct psx_gpu *gpu, uint32_t *data, int count, int is_rea
   return count_initial - count / 2;
 }
 
+// Скільки гра працює з VRAM повз растеризатор: запис із процесора, читання в
+// процесор і копіювання всередині VRAM, у штуках і пікселях. Для програмного
+// растеризатора це дрібниця, бо VRAM і так у пам'яті; для апаратного це точки
+// синхронізації, де кадр довелося б читати назад із GPU. Лічильники безумовні -
+// ці шляхи трапляються рідше разу на кадр, тож коштують нічого.
+unsigned int gpulib_vram_stats[6];
+
 static noinline void start_vram_transfer(struct psx_gpu *gpu, uint32_t pos_word,
   uint32_t size_word, int is_read)
 {
@@ -594,6 +601,8 @@ static noinline void start_vram_transfer(struct psx_gpu *gpu, uint32_t pos_word,
   gpu->dma.offset = 0;
   gpu->dma.is_read = is_read;
   gpu->dma_start = gpu->dma;
+  gpulib_vram_stats[is_read ? 2 : 0]++;
+  gpulib_vram_stats[is_read ? 3 : 1] += gpu->dma.w * gpu->dma.h;
 
   // postponed until the actual transfer
   //sync_renderer(gpu);
@@ -885,6 +894,9 @@ static noinline int do_cmd_buffer(struct psx_gpu *gpu, uint32_t *data, int count
         break;
       *cycles_sum += *cycles_last;
       *cycles_last = 0;
+      gpulib_vram_stats[4]++;
+      gpulib_vram_stats[5] += ((((LE32TOH(data[pos + 3])      ) - 1) & 0x3ff) + 1)
+                            * ((((LE32TOH(data[pos + 3]) >> 16) - 1) & 0x1ff) + 1);
       if (do_vram_copy_pre(gpu, data + pos, cycles_last))
         do_vram_copy(gpu->vram, gpu->ex_regs, data + pos);
       pos += 4;

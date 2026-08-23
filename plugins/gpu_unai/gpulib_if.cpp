@@ -81,6 +81,9 @@ extern "C" void gpu_unai_set_config(int pixel_skip, int ilace_force,
 // порівняти обидві картинки на тому самому кадрі.
 extern "C" {
   int  glrEnabled(void) __attribute__((weak));
+  void glrSetVram(const void *vram) __attribute__((weak));
+  void glrInvalidate(void) __attribute__((weak));
+  void glrInvalidateRect(int x, int y, int w, int h) __attribute__((weak));
   void glrPrim(unsigned cmd, const unsigned *packet, const int *state)
     __attribute__((weak));
 }
@@ -149,6 +152,10 @@ int renderer_init(void)
 {
   memset((void*)&gpu_unai, 0, sizeof(gpu_unai));
   gpu_unai.vram = (le16_t *)gpu.vram;
+  // Растеризатор на MBX декодує текстурні сторінки сам, тож йому потрібен той
+  // самий VRAM. Віддаємо один раз - він за процес не переїжджає.
+  if (glrSetVram)
+    glrSetVram(gpu.vram);
 
   // Original standalone gpu_unai initialized TextureWindow[]. I added the
   //  same behavior here, since it seems unsafe to leave [2],[3] unset when
@@ -762,7 +769,7 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
     // сторінку й CLUT ставлять обробники пакетів, і на цьому місці весь стан
     // уже поточний. Порядок полів дзеркалить enum TGlrState у glrender.cpp.
     if (glrEnabled && glrPrim && glrEnabled()) {
-      int st[10];
+      int st[12];
       st[0] = gpu_unai.DrawingOffset[0];
       st[1] = gpu_unai.DrawingOffset[1];
       st[2] = gpu_unai.DrawingArea[0];
@@ -773,6 +780,11 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
       st[7] = gpu_unai.TEXT_MODE;
       st[8] = (int)(gpu_unai.inn.TBA - gpu_unai.vram);
       st[9] = (int)((gpu_unai.inn.CBA - gpu_unai.vram) >> 4);
+      // TBA уже містить початок текстурного вікна (gpuSetTexture), а самі
+      // координати растеризатор маскує саме цими двома значеннями. Без них
+      // вікно врахувалося б двічі, і на апараті це видно як покришений HUD.
+      st[10] = gpu_unai.TextureWindow[2];
+      st[11] = gpu_unai.TextureWindow[3];
       glrPrim(cmd, (const unsigned *)&gpu_unai.PacketBuffer, st);
     }
 #ifdef GPU_UNAI_PRIMSTATS
@@ -871,8 +883,15 @@ void renderer_sync_ecmds(u32 *ecmds_)
     oldunai_renderer_sync_ecmds(ecmds);
 }
 
+// Апстрімний гачок: гра переписала шматок VRAM. У gpu_unai кешів немає, тому
+// тут порожньо, а от растеризатор на MBX тримає розпаковані сторінки в пам'яті
+// GPU, і вони могли застаріти. Скидаємо саме ті, яких запис торкнувся:
+// скидання всього кешу коштувало 4,5 мс на кадр, бо після кожного запису
+// доводилось наново розпакувати весь робочий набір.
 void renderer_update_caches(int x, int y, int w, int h, int state_changed)
 {
+  if (glrInvalidateRect)
+    glrInvalidateRect(x, y, w, h);
 }
 
 void renderer_flush_queues(void)
@@ -889,6 +908,10 @@ void renderer_set_interlace(int enable, int is_odd)
 void renderer_set_config(const struct rearmed_cbs *cbs)
 {
   gpu_unai.vram = (le16_t *)gpu.vram;
+  // Растеризатор на MBX декодує текстурні сторінки сам, тож йому потрібен той
+  // самий VRAM. Віддаємо один раз - він за процес не переїжджає.
+  if (glrSetVram)
+    glrSetVram(gpu.vram);
   gpu_unai.config.old_renderer  = cbs->gpu_unai.old_renderer;
   gpu_unai.config.ilace_force   = cbs->gpu_unai.ilace_force;
   gpu_unai.config.lighting      = cbs->gpu_unai.lighting;

@@ -74,6 +74,17 @@ extern "C" void gpu_unai_set_config(int pixel_skip, int ilace_force,
   gpu_unai_config_ext.blending      = blending ? 1 : 0;
 }
 
+// Растеризатор на MBX живе в оболонці, бо там контекст GL; тому слабкі символи -
+// звичайна збірка лінкується без нього. Він приймає ті самі пакети, які щойно
+// намалював gpu_unai, а не замість них: програмний VRAM лишається правдивим для
+// читань, копіювань і показу, поки гілка не доведена, і будь-якої миті можна
+// порівняти обидві картинки на тому самому кадрі.
+extern "C" {
+  int  glrEnabled(void) __attribute__((weak));
+  void glrPrim(unsigned cmd, const unsigned *packet, const int *state)
+    __attribute__((weak));
+}
+
 #ifdef GPU_UNAI_PRIMSTATS
 gpu_unai_primstats_t gpu_unai_primstats;
 u32 gpu_unai_primstats_cur;
@@ -746,6 +757,23 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
         ex_regs[(cmd_word >> 24) & 7] = cmd_word;
         gpuGP0Cmd_0xEx(gpu_unai, cmd_word);
       } break;
+    }
+    // Той самий примітив у растеризатор на MBX. Саме тут, а не в кожному case:
+    // сторінку й CLUT ставлять обробники пакетів, і на цьому місці весь стан
+    // уже поточний. Порядок полів дзеркалить enum TGlrState у glrender.cpp.
+    if (glrEnabled && glrPrim && glrEnabled()) {
+      int st[10];
+      st[0] = gpu_unai.DrawingOffset[0];
+      st[1] = gpu_unai.DrawingOffset[1];
+      st[2] = gpu_unai.DrawingArea[0];
+      st[3] = gpu_unai.DrawingArea[1];
+      st[4] = gpu_unai.DrawingArea[2];
+      st[5] = gpu_unai.DrawingArea[3];
+      st[6] = (gpu_unai.BLEND_MODE >> 3) & 3;
+      st[7] = gpu_unai.TEXT_MODE;
+      st[8] = (int)(gpu_unai.inn.TBA - gpu_unai.vram);
+      st[9] = (int)((gpu_unai.inn.CBA - gpu_unai.vram) >> 4);
+      glrPrim(cmd, (const unsigned *)&gpu_unai.PacketBuffer, st);
     }
 #ifdef GPU_UNAI_PRIMSTATS
     // Растеризатор коду команди вже не бачить, тому площу, яку він накопичив у

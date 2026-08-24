@@ -19,7 +19,7 @@ void gpu_state_change(int what, int cycles)
 	switch (state)
 	{
 	case PGS_VRAM_TRANSFER_START:
-		psxRegs.gpuIdleAfter = psxRegs.cycle + PSXCLK / 50;
+		psxRegs.gpuIdleAfter = psxRegs.cycle + gpu_scale_cycles(PSXCLK / 50);
 		break;
 	case PGS_VRAM_TRANSFER_END:
 		psxRegs.gpuIdleAfter = psxRegs.cycle - 1;
@@ -28,7 +28,8 @@ void gpu_state_change(int what, int cycles)
 		// limit because gpulib delays things with it's buffering...
 		if (cycles > 512)
 			cycles = 512;
-		psxRegs.gpuIdleAfter = psxRegs.cycle + cycles - 1;
+		// Масштабування після ліміту буферизації gpulib, а не до нього
+		psxRegs.gpuIdleAfter = psxRegs.cycle + gpu_scale_cycles(cycles - 1);
 		break;
 	}
 }

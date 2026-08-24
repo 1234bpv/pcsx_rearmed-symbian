@@ -31,6 +31,23 @@
 #define PSXDMA_LOG(...)
 #endif
 
+// Наскільки швидким гість бачить GPU: 100 - як на консолі, більше - швидше.
+// Це свідоме відхилення від точності. Гра чекає на біт зайнятості GPU і на
+// завершення DMA, тож коротший час обох змушує її гортати буфер частіше:
+// показаних кадрів більше, темп емуляції нижчий. Довший - навпаки, гра сама
+// пропускає кадр і не збирає для нього ані ordering table, ані команд GP0.
+// Масштабувати треба ОБИДВІ величини - і gpuIdleAfter, і подію PSXINT_GPUDMA:
+// сам лише біт зайнятості нічого не дасть грі, яка чекає кінця пересилання.
+int g_gpuSpeedPct = 100;
+
+// Знаковий тип навмисно: у ланцюжку DMA залишок тактів буває від'ємним, і в
+// беззнаковому він обернувся б на величезне число замість "вже минуло".
+s32 gpu_scale_cycles(s32 cycles) {
+	if (cycles <= 0 || g_gpuSpeedPct == 100 || g_gpuSpeedPct <= 0)
+		return cycles;
+	return (s32)((long long)cycles * 100 / g_gpuSpeedPct);
+}
+
 // Dma0/1 in Mdec.c
 // Dma3   in CdRom.c
 
@@ -161,9 +178,9 @@ void psxDma2(u32 madr, u32 bcr, u32 chcr) { // GPU
 			HW_DMA2_MADR = SWAPu32(madr + words_copy * 4);
 
 			// careful: gpu_state_change() also messes with this
-			psxRegs.gpuIdleAfter = psxRegs.cycle + words / 4 + 16;
+			psxRegs.gpuIdleAfter = psxRegs.cycle + gpu_scale_cycles(words / 4 + 16);
 			// already 32-bit word size ((size * 4) / 4)
-			set_event(PSXINT_GPUDMA, words / 4);
+			set_event(PSXINT_GPUDMA, gpu_scale_cycles(words / 4));
 			return;
 
 		case 0x01000201: // mem2vram
@@ -184,9 +201,9 @@ void psxDma2(u32 madr, u32 bcr, u32 chcr) { // GPU
 			HW_DMA2_MADR = SWAPu32(madr);
 
 			// careful: gpu_state_change() also messes with this
-			psxRegs.gpuIdleAfter = psxRegs.cycle + words / 4 + 16;
+			psxRegs.gpuIdleAfter = psxRegs.cycle + gpu_scale_cycles(words / 4 + 16);
 			// already 32-bit word size ((size * 4) / 4)
-			set_event(PSXINT_GPUDMA, words / 4);
+			set_event(PSXINT_GPUDMA, gpu_scale_cycles(words / 4));
 			return;
 
 		case 0x01000401: // dma chain
@@ -210,8 +227,8 @@ void psxDma2(u32 madr, u32 bcr, u32 chcr) { // GPU
 			    && !(HW_GPU_STATUS & SWAP32(PSXGPU_DHEIGHT | PSXGPU_RGB24)))
 				cycles_sum = Config.gpu_timing_override;
 
-			psxRegs.gpuIdleAfter = psxRegs.cycle + cycles_sum + cycles_last_cmd;
-			set_event(PSXINT_GPUDMA, cycles_sum);
+			psxRegs.gpuIdleAfter = psxRegs.cycle + gpu_scale_cycles(cycles_sum + cycles_last_cmd);
+			set_event(PSXINT_GPUDMA, gpu_scale_cycles(cycles_sum));
 			//printf("%u dma2cf: %6ld,%4d %08x %08x %08x %08x\n", psxRegs.cycle,
 			//  cycles_sum, cycles_last_cmd, madr, bcr, chcr, HW_DMA2_MADR);
 			return;
@@ -233,13 +250,13 @@ void gpuInterrupt() {
 		s32 cycles_last_cmd = 0;
 
 		do {
-			cycles_sum += cycles_last_cmd;
-			cycles_sum += GPU_dmaChain((u32 *)psxRegs.ptrs.psxM,
-					madr_next & 0x1fffff, &madr_next, &cycles_last_cmd);
+			cycles_sum += gpu_scale_cycles(cycles_last_cmd);
+			cycles_sum += gpu_scale_cycles(GPU_dmaChain((u32 *)psxRegs.ptrs.psxM,
+					madr_next & 0x1fffff, &madr_next, &cycles_last_cmd));
 		}
 		while (cycles_sum <= 0 && !(madr_next & 0x800000));
 		HW_DMA2_MADR = SWAPu32(madr_next);
-		psxRegs.gpuIdleAfter = psxRegs.cycle + cycles_sum + cycles_last_cmd;
+		psxRegs.gpuIdleAfter = psxRegs.cycle + cycles_sum + gpu_scale_cycles(cycles_last_cmd);
 		set_event(PSXINT_GPUDMA, cycles_sum);
 		//printf("%u dma2cn: %6d,%4d %08x\n", psxRegs.cycle, cycles_sum,
 		//  cycles_last_cmd, HW_DMA2_MADR);
@@ -253,7 +270,7 @@ void gpuInterrupt() {
 }
 
 void psxAbortDma2() {
-	psxRegs.gpuIdleAfter = psxRegs.cycle + 32;
+	psxRegs.gpuIdleAfter = psxRegs.cycle + gpu_scale_cycles(32);
 }
 
 void psxDma6(u32 madr, u32 bcr, u32 chcr) {

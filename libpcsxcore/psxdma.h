@@ -30,6 +30,10 @@ extern "C" {
 #include "psxmem.h"
 #include "psxevents.h"
 
+extern int g_gpuSpeedPct;
+
+s32 gpu_scale_cycles(s32 cycles);
+
 void psxDma2(u32 madr, u32 bcr, u32 chcr);
 void psxDma3(u32 madr, u32 bcr, u32 chcr);
 void psxDma4(u32 madr, u32 bcr, u32 chcr);

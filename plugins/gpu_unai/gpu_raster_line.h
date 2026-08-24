@@ -58,6 +58,7 @@
 //////////////////////
 void gpuDrawLineF(PtrUnion packet, const PSD gpuPixelSpanDriver)
 {
+	if (gpu_unai_sw_off) return;
 	int x0, y0, x1, y1;
 	int dx, dy;
 
@@ -301,6 +302,7 @@ void gpuDrawLineF(PtrUnion packet, const PSD gpuPixelSpanDriver)
 /////////////////////////
 void gpuDrawLineG(PtrUnion packet, const PSD gpuPixelSpanDriver)
 {
+	if (gpu_unai_sw_off) return;
 	int x0, y0, x1, y1;
 	int dx, dy, dr, dg, db;
 	u32 r0, g0, b0, r1, g1, b1;

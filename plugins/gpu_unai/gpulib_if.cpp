@@ -337,6 +337,34 @@ static inline void textured_sprite(int &cpu_cycles_sum, int &cpu_cycles)
 
 extern const unsigned char cmd_lengths[256];
 
+
+// Гачок растеризатора на MBX. Винесено окремо, бо примітив треба віддати не
+// лише з кінця диспетчера: спрощення чотирикутника у спрайти (prim_try_simplify_quad_*)
+// переписує PacketBuffer структурою спрайта і виходить зі switch, тож після
+// нього там уже НЕ той пакет, який прийшов, а код команди лишається кодом
+// чотирикутника. Розібраний як чотирикутник, такий буфер давав вершини з полів
+// ширини й висоти - на апараті це видно як банери, стягнуті в кут екрана.
+// Порядок полів дзеркалить enum TGlrState у glrender.cpp.
+static void glr_send(u32 cmd)
+{
+  int st[12];
+  st[0] = gpu_unai.DrawingOffset[0];
+  st[1] = gpu_unai.DrawingOffset[1];
+  st[2] = gpu_unai.DrawingArea[0];
+  st[3] = gpu_unai.DrawingArea[1];
+  st[4] = gpu_unai.DrawingArea[2];
+  st[5] = gpu_unai.DrawingArea[3];
+  st[6] = (gpu_unai.BLEND_MODE >> 3) & 3;
+  st[7] = gpu_unai.TEXT_MODE;
+  st[8] = (int)(gpu_unai.inn.TBA - gpu_unai.vram);
+  st[9] = (int)((gpu_unai.inn.CBA - gpu_unai.vram) >> 4);
+  // TBA уже містить початок текстурного вікна (gpuSetTexture), а маски вікна
+  // растеризатор вкладає в саму розпаковану сторінку.
+  st[10] = gpu_unai.TextureWindow[2];
+  st[11] = gpu_unai.TextureWindow[3];
+  glrPrim(cmd, (const unsigned *)&gpu_unai.PacketBuffer, st);
+}
+
 int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
  int *cycles_sum_out, int *cycles_last, int *last_cmd)
 {
@@ -367,11 +395,20 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
 
     PtrUnion packet;
     packet.ptr = (void*)&gpu_unai.PacketBuffer;
+    // Ставиться там, де примітив уже віддано растеризаторові зсередини case-у.
+    int glr_sent = 0;
 
     switch (cmd)
     {
       case 0x02:
         gpuClearImage(packet);
+        // Заливка теж переписує VRAM, а отже може зачепити текстурну сторінку
+        // або палітру: кеш розпакованих сторінок про неї має дізнатись.
+        if (glrInvalidateRect)
+          glrInvalidateRect(le16_to_u16(packet.U2[2]) & 0x3f0,
+            le16_to_u16(packet.U2[3]) & 0x1ff,
+            ((le16_to_u16(packet.U2[4]) & 0x3ff) + 15) & ~15,
+            le16_to_u16(packet.U2[5]) & 0x1ff);
         gput_sum(cpu_cycles_sum, cpu_cycles,
            gput_fill(le16_to_s16(packet.U2[4]) & 0x3ff, le16_to_s16(packet.U2[5]) & 0x1ff));
         break;
@@ -437,6 +474,11 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
         {
           for (i = 0;; ) {
             textured_sprite(cpu_cycles_sum, cpu_cycles);
+            // Кожен спрощений спрайт віддаємо окремо і з ЙОГО кодом команди:
+            // після циклу в буфері лишиться тільки останній.
+            if (glrEnabled && glrPrim && glrEnabled())
+              glr_send(le32_to_u32(gpu_unai.PacketBuffer.U4[0]) >> 24);
+            glr_sent = 1;
             if (++i >= simplified_count)
               break;
             memcpy(&gpu_unai.PacketBuffer.U4[0], &gpu_unai.PacketBuffer.U4[i * 4], 16);
@@ -561,6 +603,11 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
         {
           for (i = 0;; ) {
             textured_sprite(cpu_cycles_sum, cpu_cycles);
+            // Кожен спрощений спрайт віддаємо окремо і з ЙОГО кодом команди:
+            // після циклу в буфері лишиться тільки останній.
+            if (glrEnabled && glrPrim && glrEnabled())
+              glr_send(le32_to_u32(gpu_unai.PacketBuffer.U4[0]) >> 24);
+            glr_sent = 1;
             if (++i >= simplified_count)
               break;
             memcpy(&gpu_unai.PacketBuffer.U4[0], &gpu_unai.PacketBuffer.U4[i * 4], 16);
@@ -775,25 +822,8 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
     // Той самий примітив у растеризатор на MBX. Саме тут, а не в кожному case:
     // сторінку й CLUT ставлять обробники пакетів, і на цьому місці весь стан
     // уже поточний. Порядок полів дзеркалить enum TGlrState у glrender.cpp.
-    if (glrEnabled && glrPrim && glrEnabled()) {
-      int st[12];
-      st[0] = gpu_unai.DrawingOffset[0];
-      st[1] = gpu_unai.DrawingOffset[1];
-      st[2] = gpu_unai.DrawingArea[0];
-      st[3] = gpu_unai.DrawingArea[1];
-      st[4] = gpu_unai.DrawingArea[2];
-      st[5] = gpu_unai.DrawingArea[3];
-      st[6] = (gpu_unai.BLEND_MODE >> 3) & 3;
-      st[7] = gpu_unai.TEXT_MODE;
-      st[8] = (int)(gpu_unai.inn.TBA - gpu_unai.vram);
-      st[9] = (int)((gpu_unai.inn.CBA - gpu_unai.vram) >> 4);
-      // TBA уже містить початок текстурного вікна (gpuSetTexture), а самі
-      // координати растеризатор маскує саме цими двома значеннями. Без них
-      // вікно врахувалося б двічі, і на апараті це видно як покришений HUD.
-      st[10] = gpu_unai.TextureWindow[2];
-      st[11] = gpu_unai.TextureWindow[3];
-      glrPrim(cmd, (const unsigned *)&gpu_unai.PacketBuffer, st);
-    }
+    if (!glr_sent && glrEnabled && glrPrim && glrEnabled())
+      glr_send(cmd);
 #ifdef GPU_UNAI_PRIMSTATS
     // Растеризатор коду команди вже не бачить, тому площу, яку він накопичив у
     // gpu_unai_primstats_cur, розкладає по класах саме тут. Лінії площею не

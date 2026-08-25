@@ -28,7 +28,7 @@ void gpu_state_change(int what, int cycles)
 		// limit because gpulib delays things with it's buffering...
 		if (cycles > 512)
 			cycles = 512;
-		// Масштабування після ліміту буферизації gpulib, а не до нього
+		// Scaling after the gpulib buffering limit, not before it
 		psxRegs.gpuIdleAfter = psxRegs.cycle + gpu_scale_cycles(cycles - 1);
 		break;
 	}

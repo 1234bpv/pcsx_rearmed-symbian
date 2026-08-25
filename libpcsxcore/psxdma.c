@@ -31,17 +31,17 @@
 #define PSXDMA_LOG(...)
 #endif
 
-// Наскільки швидким гість бачить GPU: 100 - як на консолі, більше - швидше.
-// Це свідоме відхилення від точності. Гра чекає на біт зайнятості GPU і на
-// завершення DMA, тож коротший час обох змушує її гортати буфер частіше:
-// показаних кадрів більше, темп емуляції нижчий. Довший - навпаки, гра сама
-// пропускає кадр і не збирає для нього ані ordering table, ані команд GP0.
-// Масштабувати треба ОБИДВІ величини - і gpuIdleAfter, і подію PSXINT_GPUDMA:
-// сам лише біт зайнятості нічого не дасть грі, яка чекає кінця пересилання.
+// How fast the guest sees the GPU: 100 - as on console, higher - faster.
+// This is a deliberate accuracy trade-off. The game waits for the GPU busy bit and for
+// DMA completion, so a shorter duration for both makes it flip buffers more frequently:
+// more frames displayed, lower emulation rate. Longer - conversely, the game itself
+// skips the frame and builds neither ordering tables nor GP0 commands for it.
+// BOTH values must be scaled - gpuIdleAfter and the PSXINT_GPUDMA event:
+// the busy bit alone does nothing for a game waiting for the transfer to complete.
 int g_gpuSpeedPct = 100;
 
-// Знаковий тип навмисно: у ланцюжку DMA залишок тактів буває від'ємним, і в
-// беззнаковому він обернувся б на величезне число замість "вже минуло".
+// Signed type is intentional: in DMA chaining the cycle delta can be negative, and
+// an unsigned type would turn it into a huge number instead of "already elapsed".
 s32 gpu_scale_cycles(s32 cycles) {
 	if (cycles <= 0 || g_gpuSpeedPct == 100 || g_gpuSpeedPct <= 0)
 		return cycles;

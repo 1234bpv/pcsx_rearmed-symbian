@@ -432,52 +432,52 @@ static inline bool ProgressiveInterlaceEnabled()
 }
 
 #ifdef GPU_UNAI_PRIMSTATS
-// Скільки і чого гра насправді просить намалювати. Потрібно, щоб оцінити стелю
-// апаратного растеризатора: у нього ціна визначається площею, а не кількістю
-// примітивів, тож без розподілу пікселів по класах порівняння неможливе.
-// Лічильники поділено на площу (скільки пікселів пройшло крізь span-драйвери)
-// та штуки (скільки примітивів кожного класу). Ціна - один додаток на span,
-// не на піксель.
+// How much and what the game actually asks to draw. Needed to estimate the ceiling
+// of the hardware rasterizer: its cost is determined by area, not the number
+// of primitives, so without pixel distribution across classes a comparison is impossible.
+// Counters are split into area (how many pixels passed through span drivers)
+// and counts (how many primitives of each class). Cost - one addition per span,
+// not per pixel.
 struct gpu_unai_primstats_t {
 	u32 pix_poly_f, pix_poly_ft, pix_poly_g, pix_poly_gt;
 	u32 pix_sprite, pix_fill;
 	u32 n_poly_f, n_poly_ft, n_poly_g, n_poly_gt;
 	u32 n_sprite, n_line, n_fill;
-	// Розподіл полігонів за площею: <16, <64, <256, <1k, <4k, >=4k пікселів.
-	// Дрібні примітиви на апаратному растеризаторі коштують не площею, а
-	// накладними на примітив, тож саме хвіст цього розподілу вирішує справу.
+	// Polygon area distribution: <16, <64, <256, <1k, <4k, >=4k pixels.
+	// Small primitives on a hardware rasterizer cost per-primitive overhead
+	// rather than area, so the tail of this distribution decides the outcome.
 	u32 area_bucket[6];
-	// Режим напівпрозорості з GPUSTAT [6:5]: 0 = B/2+F/2, 1 = B+F, 2 = B-F,
-	// 3 = B+F/4. Режим 2 не має відповідника в GL ES 1.1, тому його частка -
-	// це і є головна перешкода гілки MBX.
+	// Semi-transparency mode from GPUSTAT [6:5]: 0 = B/2+F/2, 1 = B+F, 2 = B-F,
+	// 3 = B+F/4. Mode 2 has no equivalent in GL ES 1.1, so its fraction
+	// is the main obstacle for the MBX branch.
 	u32 blend_mode[4];
-	// Текстурний стан. Для програмного растеризатора він нічого не коштує -
-	// це просто два вказівники, - а для апаратного визначає все: кожна пара
-	// (сторінка, CLUT) це окрема текстура, а кожна її зміна в порядку подання -
-	// окремий пакет малювання. Тому міряємо і скільки різних станів ужито за
-	// кадр (стеля при ідеальному сортуванні), і скільки разів стан змінюється
-	// (ціна за найпростішої реалізації). Різниця між ними - виграш сортування.
-	u32 n_textured;   // текстурованих примітивів усього
-	u32 n_texchange;  // змін пари (сторінка, CLUT) у порядку подання
-	u32 n_tpchange;   // змін самої лише сторінки
-	u32 sum_tex;      // сума за кадрами: різних пар (сторінка, CLUT)
-	u32 sum_tp;       // сума за кадрами: різних сторінок
-	u32 max_tex;      // найбільше різних пар за один кадр
+	// Texture state. For a software rasterizer it costs nothing -
+	// just two pointers, - but for a hardware one it defines everything: each
+	// (page, CLUT) pair is a separate texture, and each change in submission order -
+	// a separate draw batch. Therefore we measure both how many unique states are used per
+	// frame (ceiling with ideal sorting) and how many times state changes
+	// (cost with naive implementation). The difference between them is the sorting gain.
+	u32 n_textured;   // total textured primitives
+	u32 n_texchange;  // (page, CLUT) pair changes in submission order
+	u32 n_tpchange;   // texture page changes only
+	u32 sum_tex;      // frame sum: unique (page, CLUT) pairs
+	u32 sum_tp;       // frame sum: unique texture pages
+	u32 max_tex;      // maximum unique pairs in a single frame
 };
 extern gpu_unai_primstats_t gpu_unai_primstats;
-// Площа примітиву, який малюється зараз. Класифікувати його всередині
-// растеризатора не можна - там уже немає коду команди, - тому span-и лише
-// додаються сюди, а розкладає їх по класах диспетчер, який код команди знає.
+// Area of the primitive currently being drawn. It cannot be classified inside
+// the rasterizer - the command code is no longer there, - so spans are only
+// added here, and the dispatcher that knows the command code classifies them.
 extern u32 gpu_unai_primstats_cur;
 #define PRIMSTAT_SPAN(n)  do { gpu_unai_primstats_cur += (u32)(n); } while (0)
 #else
 #define PRIMSTAT_SPAN(n)  do { } while (0)
 #endif
 
-// Прохід програмного растеризатора вимикається на льоту: коли сцену малює
-// растеризатор на MBX, писати ту саму сцену ще й у VRAM немає потреби.
-// Прапорець гасить лише виклики span-драйверів, тож підрахунок циклів GPU
-// і статистика примітивів лишаються тими самими, що й із програмним проходом.
+// Software rasterizer pass can be disabled on the fly: when the scene is drawn by
+// the MBX rasterizer, writing the same scene to VRAM as well is not needed.
+// The flag only suppresses span driver calls, so GPU cycle counting
+// and primitive statistics remain the same as with the software pass.
 extern int gpu_unai_sw_off;
 
 #endif // GPU_UNAI_H

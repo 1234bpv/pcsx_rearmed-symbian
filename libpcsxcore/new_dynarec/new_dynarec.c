@@ -441,10 +441,10 @@ void ndrc_write_invalidate_one(u_int addr);
 static void ndrc_write_invalidate_many(u_int addr, u_int end);
 
 #ifdef __SYMBIAN32__
-// Слід для чорної скриньки оболонки: який гостьовий блок і який прохід зараз
-// компілюються. Нуль у ndrc_dbg_pass = рекомпілятор не працює. Обробник виключень
-// на цьому апараті не викликається, тож стан має лежати там, де його прочитає
-// сусідній потік - у глобальній пам'яті, а не на стеку.
+// Trace for the shell black box: which guest block and which pass are currently
+// being compiled. Zero in ndrc_dbg_pass = recompiler is idle. The exception handler
+// is not called on this hardware, so state must reside where a neighboring thread
+// can read it - in global memory, not on the stack.
 u_int ndrc_dbg_addr, ndrc_dbg_pass, ndrc_dbg_i, ndrc_dbg_slen, ndrc_dbg_out;
 #define NDRC_DBG_PASS(n) (ndrc_dbg_pass = (n))
 #else
@@ -783,8 +783,8 @@ static void *start_tcache_write_reserve(u_int max_space)
     out = ndrc->translation_cache;
     end = out + max_space;
     perf_dump_wrap();
-    // Витіснення блоків трапляється рідко, а зачіпає рівно ті шляхи, які на
-    // Symbian вимагають IMB_Range. Мітка в лозі показує, чи воно взагалі було.
+    // Block eviction is rare, but affects precisely the code paths that on
+    // Symbian require IMB_Range. The log entry indicates if it occurred at all.
     SysPrintf("tc wrap\n");
   }
   // we do a bit more than requested to avoid large jump and lots of
@@ -6985,6 +6985,11 @@ void new_dynarec_load_blocks(const void *save, int size)
 
 void new_dynarec_print_stats(void)
 {
+  // How much of the translation cache is actually in use: the shell logs this
+  // to decide whether TARGET_SIZE_2 can come down and free RAM on the device.
+  SysPrintf("ndrc: tc out=%08x base=%08x size=%u\n",
+    (unsigned)(unsigned long)out, (unsigned)(unsigned long)ndrc->translation_cache,
+    (unsigned)sizeof(ndrc->translation_cache));
 #ifdef STAT_PRINT
   size_t i, lmem = 0;
   for (i = 0; i < ARRAY_SIZE(jumps); i++) {
@@ -10008,7 +10013,7 @@ static int noinline new_recompile_block(u_int addr)
   for (i = 0; i < st.linkcount; i++)
   {
 #ifdef __SYMBIAN32__
-    ndrc_dbg_i = i;             // на проході 9 це індекс переходу, не інструкції
+    ndrc_dbg_i = i;             // on pass 9 this is the branch index, not instruction
     ndrc_dbg_slen = st.linkcount;
     ndrc_dbg_out = (u_int)out;
 #endif
@@ -10096,7 +10101,7 @@ static int noinline new_recompile_block(u_int addr)
   fflush(stdout);
 #endif
   stat_inc(stat_bc_direct);
-  NDRC_DBG_PASS(0);   // нуль = рекомпілятор не працює; інакше слід не відрізнити від залишку
+  NDRC_DBG_PASS(0);   // zero = recompiler is idle; otherwise the trace is indistinguishable from leftover
   return 0;
 }
 

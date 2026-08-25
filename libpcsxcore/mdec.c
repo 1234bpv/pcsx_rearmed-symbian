@@ -20,8 +20,8 @@
 
 #include "mdec.h"
 
-// Профілювання MDEC: час декодування відео (rl2blk + IDCT + yuv2rgb) і обсяг
-// вихідних даних. Хук той самий, що для растеризації в gpulib.
+// MDEC profiling: video decoding time (rl2blk + IDCT + yuv2rgb) and output
+// data size. The hook is the same as for rasterization in gpulib.
 extern unsigned int ndrc_symbian_fastcount(void);
 unsigned long long g_mdecDecodeTicks;
 unsigned int g_mdecWords;

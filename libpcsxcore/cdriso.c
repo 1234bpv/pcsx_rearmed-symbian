@@ -95,8 +95,8 @@ static int (*cdimg_read_func)(FILE *f, unsigned int base, void *dest, int sector
 static int (*cdimg_read_sub_func)(FILE *f, int sector, void *dest);
 
 #ifdef __SYMBIAN32__
-// Одна точка заміру для всіх форматів образу, щоб .bin і стиснені порівнювались
-// однією міркою: читання з картки і inflate разом.
+// Single measurement point for all image formats so that .bin and compressed formats are compared
+// by the same metric: card read and inflate together.
 extern unsigned int ndrc_symbian_fastcount(void);
 unsigned long long g_cdReadTicks;
 unsigned int g_cdReadCount;

@@ -1,9 +1,9 @@
 
-// ЗАМІРЯНО 2026-08-04 на N95 8GB (ARM1136): вимкнення цього хака під ARMv6 не дає
-// нічого. Аналіз передбачав 0,4-1,6% кадру (інверсія зворотних гілок нібито марна
-// там, де є BTAC і статичне "назад - взято"), але два прогони по 9000 кадрів дали
-// 30,01 -> 30,02 мс без освітлення і 31,96 -> 32,23 з ним, тобто нуль або трохи
-// гірше. Лишаємо як в upstream. Не переоткривати без нових даних.
+// BENCHMARKED 2026-08-04 on N95 8GB (ARM1136): disabling this hack on ARMv6 yields
+// nothing. Analysis predicted 0.4-1.6% of frame time (inverting backward branches supposedly useless
+// where BTAC and static "backward - taken" exist), but two runs of 9000 frames gave
+// 30.01 -> 30.02 ms without lighting and 31.96 -> 32.23 with it, i.e. zero or slightly
+// worse. Keeping as in upstream. Do not reopen without new data.
 #ifdef __arm__
 #define CORTEX_A8_BRANCH_PREDICTION_HACK 1
 #endif

@@ -60,10 +60,10 @@
 #define IS_OLD_RENDERER() false
 #endif
 
-// Налаштування растеризатора для оболонок, які не викликають GPUrearmedCallbacks.
-// Без цього gpu_unai_config_ext лишається нульовою: не лише вимкнені hack-и, а й
-// освітлення з напівпрозорістю, тобто текстури малюються без модуляції.
-// Викликати ДО renderer_init - саме там конфіг копіюється у робочу структуру.
+// Rasterizer configuration for frontends that do not call GPUrearmedCallbacks.
+// Without this, gpu_unai_config_ext remains zeroed: not only hacks are disabled, but
+// also lighting and semi-transparency, meaning textures are drawn without modulation.
+// Call BEFORE renderer_init - that is where the config is copied into the working struct.
 extern "C" void gpu_unai_set_config(int pixel_skip, int ilace_force,
                                     int lighting, int fast_lighting, int blending)
 {
@@ -74,11 +74,11 @@ extern "C" void gpu_unai_set_config(int pixel_skip, int ilace_force,
   gpu_unai_config_ext.blending      = blending ? 1 : 0;
 }
 
-// Растеризатор на MBX живе в оболонці, бо там контекст GL; тому слабкі символи -
-// звичайна збірка лінкується без нього. Він приймає ті самі пакети, які щойно
-// намалював gpu_unai, а не замість них: програмний VRAM лишається правдивим для
-// читань, копіювань і показу, поки гілка не доведена, і будь-якої миті можна
-// порівняти обидві картинки на тому самому кадрі.
+// The MBX rasterizer lives in the frontend because the GL context is there; hence weak symbols -
+// a regular build links without it. It receives the same packets that gpu_unai just
+// rendered, rather than replacing them: software VRAM remains authoritative for
+// reads, copies, and display while the branch is work-in-progress, and at any moment
+// both images can be compared on the same frame.
 extern "C" {
   int  glrEnabled(void) __attribute__((weak));
   void glrSetVram(const void *vram) __attribute__((weak));
@@ -88,20 +88,20 @@ extern "C" {
     __attribute__((weak));
 }
 
-// Вимикач програмного проходу. Оболонка ставить його в 1 разом із аргументом
-// "swoff": сцену тоді малює тільки MBX. VRAM після цього містить лише те, що
-// туди поклав сам процесор (завантаження текстур, копіювання), тож у грі, яка
-// рендерить у VRAM і читає результат назад, картинка буде неповна - це відомий
-// компроміс заміру, а не помилка.
+// Switch for disabling the software pass. The frontend sets it to 1 alongside the
+// "swoff" argument: the scene is then rendered only by MBX. VRAM after this contains only what
+// the CPU itself wrote (texture uploads, copies), so in a game that
+// renders to VRAM and reads the result back, the image will be incomplete - this is a known
+// benchmark tradeoff, not a bug.
 int gpu_unai_sw_off;
 
 #ifdef GPU_UNAI_PRIMSTATS
 gpu_unai_primstats_t gpu_unai_primstats;
 u32 gpu_unai_primstats_cur;
 
-// Множина текстурних станів поточного кадру, відкрита адресація. Замість
-// очищення таблиці на межі кадру кожен запис несе номер кадру, тож перехід до
-// наступного - це інкремент лічильника.
+// Set of texture states of the current frame, open addressing. Instead of
+// clearing the table at frame boundaries, each entry carries a frame generation number, so transition to
+// the next frame is just a counter increment.
 #define PRIMSTAT_TEXSLOTS 512
 static u32 ps_tex_key[PRIMSTAT_TEXSLOTS], ps_tex_gen[PRIMSTAT_TEXSLOTS];
 static u32 ps_tp_key[PRIMSTAT_TEXSLOTS], ps_tp_gen[PRIMSTAT_TEXSLOTS];
@@ -109,7 +109,7 @@ static u32 ps_gen = 1;
 static u32 ps_cnt_tex, ps_cnt_tp;
 static u32 ps_last_tex, ps_last_tp;
 
-// 1, якщо ключ у цьому кадрі вже траплявся; інакше запам'ятовує і віддає 0.
+// 1 if the key has already been seen in this frame; otherwise remembers it and returns 0.
 static int primstat_seen(u32 *tab, u32 *gen, u32 key)
 {
   u32 h = (key * 0x9E3779B1u) >> 23;
@@ -118,10 +118,10 @@ static int primstat_seen(u32 *tab, u32 *gen, u32 key)
     if (gen[s] != ps_gen) { gen[s] = ps_gen; tab[s] = key; return 0; }
     if (tab[s] == key) return 1;
   }
-  return 1;  // таблиця повна: не рахуємо як новий, щоб не завищити
+  return 1;  // table full: do not count as new to avoid overcounting
 }
 
-// Межа кадру. Знає її лише оболонка, тому вона це й кличе.
+// Frame boundary. Only the frontend knows it, so it calls this.
 extern "C" void gpu_unai_primstats_frame(void)
 {
   gpu_unai_primstats.sum_tex += ps_cnt_tex;
@@ -133,8 +133,8 @@ extern "C" void gpu_unai_primstats_frame(void)
   ps_gen++;
 }
 
-// Віддає лічильники як масив u32 у порядку оголошення полів структури; форматує
-// оболонка. Так тут не потрібен snprintf - Symbian-libc його не оголошує.
+// Returns counters as a u32 array in declaration order of struct fields; formatted by
+// the frontend. This avoids needing snprintf - Symbian libc does not declare it.
 extern "C" int gpu_unai_get_primstats(unsigned *out, int max)
 {
   const u32 *p = (const u32 *)&gpu_unai_primstats;
@@ -146,9 +146,9 @@ extern "C" int gpu_unai_get_primstats(unsigned *out, int max)
 }
 #endif
 
-// Те саме, але вже після renderer_init: копіює конфіг у робочу структуру, щоб
-// зміна з меню діяла без перезапуску. Дзеркалить рядки renderer_init нижче -
-// правити треба обидва місця.
+// Same, but after renderer_init: copies config into working struct so that
+// menu changes take effect without a restart. Mirrors renderer_init lines below -
+// both places must be updated.
 extern "C" void gpu_unai_apply_config(void)
 {
   gpu_unai.config = gpu_unai_config_ext;
@@ -159,8 +159,8 @@ int renderer_init(void)
 {
   memset((void*)&gpu_unai, 0, sizeof(gpu_unai));
   gpu_unai.vram = (le16_t *)gpu.vram;
-  // Растеризатор на MBX декодує текстурні сторінки сам, тож йому потрібен той
-  // самий VRAM. Віддаємо один раз - він за процес не переїжджає.
+  // The MBX rasterizer decodes texture pages itself, so it needs the same
+  // VRAM. Pass it once - it does not relocate during the process.
   if (glrSetVram)
     glrSetVram(gpu.vram);
 
@@ -199,7 +199,7 @@ int renderer_init(void)
 #endif
 
 #ifdef GPU_UNAI_USE_YDIV_TABLE
-  // ceil(2^29/d); [0] не адресується охоронними перевірками на нульову висоту
+  // ceil(2^29/d); [0] is not addressed due to guard checks against zero height
   s_yRecip[0] = 0;
   for (int d = 1; d < CHKMAX_Y; ++d)
     s_yRecip[d] = (s32)((((u32)1 << GPU_YDIV_BITS) + d - 1) / (u32)d);
@@ -338,13 +338,13 @@ static inline void textured_sprite(int &cpu_cycles_sum, int &cpu_cycles)
 extern const unsigned char cmd_lengths[256];
 
 
-// Гачок растеризатора на MBX. Винесено окремо, бо примітив треба віддати не
-// лише з кінця диспетчера: спрощення чотирикутника у спрайти (prim_try_simplify_quad_*)
-// переписує PacketBuffer структурою спрайта і виходить зі switch, тож після
-// нього там уже НЕ той пакет, який прийшов, а код команди лишається кодом
-// чотирикутника. Розібраний як чотирикутник, такий буфер давав вершини з полів
-// ширини й висоти - на апараті це видно як банери, стягнуті в кут екрана.
-// Порядок полів дзеркалить enum TGlrState у glrender.cpp.
+// MBX rasterizer hook. Extracted separately because primitive must be submitted not
+// only from the end of the dispatcher: quad-to-sprite simplification (prim_try_simplify_quad_*)
+// overwrites PacketBuffer with a sprite structure and exits the switch, so after
+// it there is NO longer the incoming packet, while command code remains a quad
+// command code. Parsed as a quad, such a buffer produced vertices from width and
+// height fields - on hardware this appeared as banners squished into the screen corner.
+// Field order mirrors enum TGlrState in glrender.cpp.
 static void glr_send(u32 cmd)
 {
   int st[12];
@@ -358,8 +358,8 @@ static void glr_send(u32 cmd)
   st[7] = gpu_unai.TEXT_MODE;
   st[8] = (int)(gpu_unai.inn.TBA - gpu_unai.vram);
   st[9] = (int)((gpu_unai.inn.CBA - gpu_unai.vram) >> 4);
-  // TBA уже містить початок текстурного вікна (gpuSetTexture), а маски вікна
-  // растеризатор вкладає в саму розпаковану сторінку.
+  // TBA already contains texture window origin (gpuSetTexture), and window masks
+  // are embedded by the rasterizer into the unpacked page itself.
   st[10] = gpu_unai.TextureWindow[2];
   st[11] = gpu_unai.TextureWindow[3];
   glrPrim(cmd, (const unsigned *)&gpu_unai.PacketBuffer, st);
@@ -395,15 +395,15 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
 
     PtrUnion packet;
     packet.ptr = (void*)&gpu_unai.PacketBuffer;
-    // Ставиться там, де примітив уже віддано растеризаторові зсередини case-у.
+    // Set where primitive has already been submitted to rasterizer from inside the case.
     int glr_sent = 0;
 
     switch (cmd)
     {
       case 0x02:
         gpuClearImage(packet);
-        // Заливка теж переписує VRAM, а отже може зачепити текстурну сторінку
-        // або палітру: кеш розпакованих сторінок про неї має дізнатись.
+        // Fill also overwrites VRAM, and thus might affect a texture page
+        // or palette: the unpacked page cache must be notified about it.
         if (glrInvalidateRect)
           glrInvalidateRect(le16_to_u16(packet.U2[2]) & 0x3f0,
             le16_to_u16(packet.U2[3]) & 0x1ff,
@@ -474,8 +474,8 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
         {
           for (i = 0;; ) {
             textured_sprite(cpu_cycles_sum, cpu_cycles);
-            // Кожен спрощений спрайт віддаємо окремо і з ЙОГО кодом команди:
-            // після циклу в буфері лишиться тільки останній.
+            // Submit each simplified sprite separately with ITS own command code:
+            // after the loop only the last one remains in the buffer.
             if (glrEnabled && glrPrim && glrEnabled())
               glr_send(le32_to_u32(gpu_unai.PacketBuffer.U4[0]) >> 24);
             glr_sent = 1;
@@ -603,8 +603,8 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
         {
           for (i = 0;; ) {
             textured_sprite(cpu_cycles_sum, cpu_cycles);
-            // Кожен спрощений спрайт віддаємо окремо і з ЙОГО кодом команди:
-            // після циклу в буфері лишиться тільки останній.
+            // Submit each simplified sprite separately with ITS own command code:
+            // after the loop only the last one remains in the buffer.
             if (glrEnabled && glrPrim && glrEnabled())
               glr_send(le32_to_u32(gpu_unai.PacketBuffer.U4[0]) >> 24);
             glr_sent = 1;
@@ -819,22 +819,22 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
         gpuGP0Cmd_0xEx(gpu_unai, cmd_word);
       } break;
     }
-    // Той самий примітив у растеризатор на MBX. Саме тут, а не в кожному case:
-    // сторінку й CLUT ставлять обробники пакетів, і на цьому місці весь стан
-    // уже поточний. Порядок полів дзеркалить enum TGlrState у glrender.cpp.
+    // The same primitive to the MBX rasterizer. Handled here rather than in each case:
+    // page and CLUT are set by packet handlers, and at this point all state
+    // is already current. Field order mirrors enum TGlrState in glrender.cpp.
     if (!glr_sent && glrEnabled && glrPrim && glrEnabled())
       glr_send(cmd);
 #ifdef GPU_UNAI_PRIMSTATS
-    // Растеризатор коду команди вже не бачить, тому площу, яку він накопичив у
-    // gpu_unai_primstats_cur, розкладає по класах саме тут. Лінії площею не
-    // враховуються - у них десяток місць виклику драйвера, а частка мізерна;
-    // рахуємо лише штуки.
+    // The rasterizer no longer sees the command code, so the area accumulated in
+    // gpu_unai_primstats_cur is classified here. Lines are not accounted by
+    // area - they have a dozen driver call sites and a negligible share;
+    // we only count primitive instances.
     {
       u32 px = gpu_unai_primstats_cur;
       gpu_unai_primstats_cur = 0;
       if (cmd >= 0x20 && cmd <= 0x3f) {
-        // Клас визначають лише два біти коду: 0x04 - текстурований,
-        // 0x10 - Gouraud. Біт 0x08 (квад проти трикутника) на клас не впливає.
+        // The class is determined by only two code bits: 0x04 - textured,
+        // 0x10 - Gouraud. Bit 0x08 (quad vs triangle) does not affect class.
         switch (cmd & 0x14) {
         case 0x00: gpu_unai_primstats.pix_poly_f  += px;
                    gpu_unai_primstats.n_poly_f++;  break;
@@ -864,20 +864,20 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
                                      * (u32)(le16_to_s16(packet.U2[5]) & 0x1ff);
         gpu_unai_primstats.n_fill++;
       }
-      // Режим напівпрозорості рахуємо лише для примітивів, у яких вона ввімкнена
-      // (біт 1 коду команди) - решта в GL не потребує blend взагалі.
+      // Semi-transparency mode is counted only for primitives that have it enabled
+      // (bit 1 of command code) - the rest in GL do not need blend at all.
       if ((cmd & 2) && cmd >= 0x20 && cmd <= 0x7f)
         gpu_unai_primstats.blend_mode[(gpu_unai.BLEND_MODE >> 3) & 3]++;
-      // Текстурний стан. Читається саме тут, після обробника пакета: сторінку й
-      // CLUT ставлять gpuSetTexture/gpuSetCLUT усередині нього.
-      // Лінії з діапазону виключено навмисно: у них біт 2 означає не текстуру, а
-      // нічого, і полічити їх як текстуровані було б хибою.
+      // Texture state. Read right here, after the packet handler: page and
+      // CLUT are set by gpuSetTexture/gpuSetCLUT inside it.
+      // Lines are excluded from range intentionally: in them bit 2 means nothing rather
+      // than texture, and counting them as textured would be an error.
       if ((cmd & 4) && ((cmd >= 0x20 && cmd <= 0x3f) || (cmd >= 0x60 && cmd <= 0x7f))) {
         u32 tba = (u32)(gpu_unai.inn.TBA - gpu_unai.vram);
         u32 tp  = (tba * 0x9E3779B1u) ^ ((u32)gpu_unai.TEXT_MODE * 0xC2B2AE35u);
         u32 tk  = tp;
-        // У 16-бітному режимі CLUT не читається, і його поточне значення до
-        // текстури не належить - інакше лічильник роздувся б на порожньому місці.
+        // In 16-bit mode CLUT is not read, and its current value does not belong
+        // to the texture - otherwise the counter would inflate for no reason.
         if (gpu_unai.TEXT_MODE != (3 << 5)) {
           u32 cba = (u32)(gpu_unai.inn.CBA - gpu_unai.vram) >> 4;
           tk ^= cba * 0x85EBCA6Bu;
@@ -920,11 +920,11 @@ void renderer_sync_ecmds(u32 *ecmds_)
     oldunai_renderer_sync_ecmds(ecmds);
 }
 
-// Апстрімний гачок: гра переписала шматок VRAM. У gpu_unai кешів немає, тому
-// тут порожньо, а от растеризатор на MBX тримає розпаковані сторінки в пам'яті
-// GPU, і вони могли застаріти. Скидаємо саме ті, яких запис торкнувся:
-// скидання всього кешу коштувало 4,5 мс на кадр, бо після кожного запису
-// доводилось наново розпакувати весь робочий набір.
+// Upstream hook: the game overwrote a chunk of VRAM. gpu_unai has no caches, so
+// it is empty here, but the MBX rasterizer keeps unpacked pages in GPU memory,
+// and they may become stale. We invalidate only those touched by the write:
+// flushing the whole cache cost 4.5 ms per frame because after each write
+// the entire working set had to be unpacked anew.
 void renderer_update_caches(int x, int y, int w, int h, int state_changed)
 {
   if (glrInvalidateRect)
@@ -945,8 +945,8 @@ void renderer_set_interlace(int enable, int is_odd)
 void renderer_set_config(const struct rearmed_cbs *cbs)
 {
   gpu_unai.vram = (le16_t *)gpu.vram;
-  // Растеризатор на MBX декодує текстурні сторінки сам, тож йому потрібен той
-  // самий VRAM. Віддаємо один раз - він за процес не переїжджає.
+  // The MBX rasterizer decodes texture pages itself, so it needs the same
+  // VRAM. Pass it once - it does not relocate during the process.
   if (glrSetVram)
     glrSetVram(gpu.vram);
   gpu_unai.config.old_renderer  = cbs->gpu_unai.old_renderer;

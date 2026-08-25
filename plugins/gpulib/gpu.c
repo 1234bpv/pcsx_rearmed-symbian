@@ -33,8 +33,8 @@ unsigned int g_gpulibWriteData, g_gpulibWriteDataMem, g_gpulibDmaChain;
 unsigned int g_gpulibDmaWords, g_gpulibWriteStatus, g_gpulibReadStatus;
 unsigned int g_gpulibStatusLast;
 
-// Профілювання растеризації: скільки часу gpu_unai малює у VRAM. Хук
-// ndrc_symbian_fastcount - високороздільний лічильник (ndrc_mem_symbian.cpp).
+// Rasterization profiling: how much time gpu_unai spends drawing into VRAM. Hook
+// ndrc_symbian_fastcount is a high-resolution counter (ndrc_mem_symbian.cpp).
 extern unsigned int ndrc_symbian_fastcount(void);
 unsigned long long g_gpulibRenderTicks;
 
@@ -581,11 +581,11 @@ static int do_vram_io(struct psx_gpu *gpu, uint32_t *data, int count, int is_rea
   return count_initial - count / 2;
 }
 
-// Скільки гра працює з VRAM повз растеризатор: запис із процесора, читання в
-// процесор і копіювання всередині VRAM, у штуках і пікселях. Для програмного
-// растеризатора це дрібниця, бо VRAM і так у пам'яті; для апаратного це точки
-// синхронізації, де кадр довелося б читати назад із GPU. Лічильники безумовні -
-// ці шляхи трапляються рідше разу на кадр, тож коштують нічого.
+// How much the game accesses VRAM bypassing the rasterizer: CPU writes, CPU
+// reads, and copies within VRAM, in counts and pixels. For a software
+// rasterizer this is negligible since VRAM is already in memory; for a hardware one these are
+// sync points where the frame would have to be read back from the GPU. Counters are unconditional -
+// these paths occur less than once per frame, so they cost nothing.
 unsigned int gpulib_vram_stats[6];
 
 static noinline void start_vram_transfer(struct psx_gpu *gpu, uint32_t pos_word,
@@ -976,9 +976,9 @@ void GPUwriteData(uint32_t data)
 {
   g_gpulibWriteData++;
   log_io(&gpu, "gpu_write %08x\n", data);
-  // Третій вхід растеризації. Довго лишався незаміряним, і з того, що викликів
-  // тут удесятеро більше, ніж у GPUwriteDataMem, зробили висновок, ніби лічильник
-  // занижує вдвічі. Виклики не рівні: сюди приходить ОДНЕ слово, туди - тисячі.
+  // Third entry point of rasterization. Remained unmeasured for a long time, and from the fact that calls
+  // here were 10x more frequent than in GPUwriteDataMem, it was concluded that the counter
+  // underestimated by half. Calls are not equal: ONE word comes here, thousands go there.
   const unsigned int _rt0 = ndrc_symbian_fastcount();
   gpu.cmd_buffer[gpu.cmd_len++] = HTOLE32(data);
   if (gpu.cmd_len >= CMD_BUFFER_LEN) {

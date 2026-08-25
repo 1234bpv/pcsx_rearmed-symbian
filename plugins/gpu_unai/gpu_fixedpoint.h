@@ -76,12 +76,12 @@ INLINE float FloatInv(const float x)
 // --- BEGIN INVERSE APPROXIMATION SECTION ---
 ///////////////////////////////////////////////////////////////////////////
 #ifdef GPU_UNAI_USE_YDIV_TABLE
-// Ділення на різницю Y у setup-і полігона. polyUseTriangle відкидає трикутник
-// заввишки >= CHKMAX_Y, а завширшки >= CHKMAX_X, тож тут |d| < 512 і
-// |n| <= 1023 << FIXED_BITS < 2^20. За цих меж множення на ceil(2^29/d) дає
-// БІТ-У-БІТ той самий результат, що й ділення: похибка < 2^20/2^29 = 1/512 <= 1/|d|.
-// Відміна від GPU_UNAI_USE_INT_DIV_MULTINV: таблиця на 2 КБ (а не 256 КБ проти
-// 16-КБ кеша даних) і результат точний, а не з похибкою 2^-15.
+// Division by Y difference in polygon setup. polyUseTriangle rejects triangles
+// with height >= CHKMAX_Y and width >= CHKMAX_X, so here |d| < 512 and
+// |n| <= 1023 << FIXED_BITS < 2^20. Within these bounds, multiplication by ceil(2^29/d) gives
+// BIT-FOR-BIT the same result as division: error < 2^20/2^29 = 1/512 <= 1/|d|.
+// Difference from GPU_UNAI_USE_INT_DIV_MULTINV: 2 KB table (instead of 256 KB vs
+// 16 KB data cache) and the result is exact, not with 2^-15 error.
 #define GPU_YDIV_BITS 29
 s32 s_yRecip[CHKMAX_Y];
 

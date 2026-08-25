@@ -38,6 +38,10 @@
 
 static void ari64_thread_sync(void);
 
+// Pre-compiling the saved blocks crashes on Symbian; measured to be the only
+// section of LoadState that dies. Blocks are recompiled on demand anyway.
+int ndrc_skip_load_blocks = 1;
+
 void ndrc_freeze(void *f, int mode)
 {
 	const char header_save[8] = "ariblks";
@@ -80,8 +84,10 @@ void ndrc_freeze(void *f, int mode)
 				size = 0;
 		} while (0);
 
-		if (psxCpu != &psxInt)
+		SysPrintf("ndrc: load blocks size=%d skip=%d\n", size, ndrc_skip_load_blocks);
+		if (psxCpu != &psxInt && !ndrc_skip_load_blocks)
 			new_dynarec_load_blocks(addrs, size);
+		SysPrintf("ndrc: load blocks done\n");
 	}
 
 	//printf("drc: %d block info entries %s\n", size/8, mode ? "saved" : "loaded");

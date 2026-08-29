@@ -181,6 +181,7 @@ int renderer_init(void)
   //           (used for polygon-drawing in gpu_inner.h, gpu_raster_polygon.h)
   gpu_unai.inn.mask_v00u =
     ((u32)gpu_unai.TextureWindow[3] << 24) | gpu_unai.TextureWindow[2];
+  if (unai_texFlat) gpu_unai.inn.mask_v00u = 0;
 
   // Configuration options
   gpu_unai.config = gpu_unai_config_ext;
@@ -272,6 +273,7 @@ static void gpuGP0Cmd_0xEx(gpu_unai_t &gpu_unai, u32 cmd_word)
         // Inner loop vars must be updated whenever texture window is changed:
         gpu_unai.inn.mask_v00u =
           ((u32)gpu_unai.TextureWindow[3] << 24) | gpu_unai.TextureWindow[2];
+  if (unai_texFlat) gpu_unai.inn.mask_v00u = 0;
 
         gpuSetTexture(gpu_unai.GPU_GP1);
       }
@@ -1017,6 +1019,8 @@ void renderer_set_config(const struct rearmed_cbs *cbs)
 // Zero unless the library was built with UNAI_DRAWSTATS.
 extern unsigned int unai_drawCnt[12];
 extern int unai_spanOff;
+extern int unai_texFlat;
+extern int unai_dstFlat;
 
 extern "C" void gpuUnaiDrawStats(unsigned int *out, int n)
 {
@@ -1028,4 +1032,14 @@ extern "C" void gpuUnaiDrawStats(unsigned int *out, int n)
 extern "C" void gpuUnaiSetSpanOff(int on)
 {
   unai_spanOff = on;
+}
+
+extern "C" void gpuUnaiSetTexFlat(int on)
+{
+  unai_texFlat = on;
+}
+
+extern "C" void gpuUnaiSetDstFlat(int on)
+{
+  unai_dstFlat = on;
 }

@@ -36,6 +36,16 @@
 #define  CF_MASKSET   ((CF>> 8)&1) // Mask bit set
 #define  CF_DITHER    ((CF>> 9)&1) // Dithering
 
+// Draw-shape counters and the two rasteriser cut-off probes. Both are opt-in at
+// build time (UNAI_DRAWSTATS): counting costs 1.2 s over a 73 s run, which is
+// the same order as the effects being measured.
+// 0 poly spans, 1 poly pixels, 2 of them textured, 3 of them lit, 4 sprite
+// calls, 5 sprite pixels, 6 tile calls, 7 tile pixels, 8 poly pixels blended,
+// 9 sprite pixels textured, 10 polygon primitives, 11 row-loop iterations.
+unsigned int unai_drawCnt[12];
+// 1 draws no span, 2 skips polygon setup as well, 3 stops before the row loop.
+int unai_spanOff;
+
 #include "gpu_inner_blend.h"
 #include "gpu_inner_quantization.h"
 #include "gpu_inner_light.h"
@@ -320,6 +330,11 @@ static noinline void gpuTileDriverFn(le16_t *pDst, u16 data, u32 count,
 template<int CF>
 static void TileAsm(le16_t *pDst, u16 data, u32 count, const gpu_unai_inner_t &inn)
 {
+#ifdef UNAI_DRAWSTATS
+	unai_drawCnt[6]++;
+	unai_drawCnt[7] += count * (unsigned)(inn.y1 - inn.y0);
+	if (unai_spanOff) return;
+#endif
 	switch (CF) {
 	case 0x02: tile_driver_st0_asm(pDst, data, count, &inn); return;
 	case 0x0a: tile_driver_st1_asm(pDst, data, count, &inn); return;
@@ -452,6 +467,12 @@ template<int CF>
 static void SpriteMaybeAsm(le16_t *pPixel, u32 count, const u8 *pTxt_base,
         const gpu_unai_inner_t &inn)
 {
+#ifdef UNAI_DRAWSTATS
+  unai_drawCnt[4]++;
+  unai_drawCnt[5] += count * (unsigned)(inn.y1 - inn.y0);
+  if (CF_TEXTMODE) unai_drawCnt[9] += count * (unsigned)(inn.y1 - inn.y0);
+  if (unai_spanOff) return;
+#endif
 #if 1
   s32 lines = inn.y1 - inn.y0;
   u32 u1m = inn.u + count - 1, v1m = inn.v + lines - 1;
@@ -746,6 +767,14 @@ endpolytext:
 template<int CF>
 static void PolySpanMaybeAsm(const gpu_unai_t &gpu_unai, le16_t *pDst, u32 count, s32 y)
 {
+#ifdef UNAI_DRAWSTATS
+	unai_drawCnt[0]++;
+	unai_drawCnt[1] += count;
+	if (CF_TEXTMODE) unai_drawCnt[2] += count;
+	if (CF_LIGHT)    unai_drawCnt[3] += count;
+	if (CF_BLEND)    unai_drawCnt[8] += count;
+	if (unai_spanOff) return;
+#endif
 #define DV(y) gpu_unai.DitherLut32[y & 3]
 	// [utx|Xbp]     - untextured, Xbpp
 	// l[0|1|g]      - modulation/lighting off|on|gouraud

@@ -353,6 +353,10 @@ void gpuDrawPolyF(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_quad
 			if (yb > ymax) yb = ymax;
 
 			int loop1 = yb - ya;
+#ifdef UNAI_DRAWSTATS
+			unai_drawCnt[11] += (unsigned)loop1;
+			if (unai_spanOff >= 3) continue;
+#endif
 			if (loop1 <= 0)
 				continue;
 
@@ -368,6 +372,10 @@ void gpuDrawPolyF(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_quad
 				if ((ya&pi)==pif) continue;
 
 				xa = FixedCeilToInt(x3);  xb = FixedCeilToInt(x4);
+				// 37 percent of the rows of a scene like this are empty; interpolating
+				// their gradients first and discarding them afterwards was pure loss.
+				// Clamping only narrows the span, so an empty one stays empty.
+				if (xa >= xb) continue;
 				if ((xmin - xa) > 0) xa = xmin;
 				if (xb > xmax) xb = xmax;
 				if ((xb - xa) > 0) {
@@ -664,6 +672,10 @@ void gpuDrawPolyFT(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_qua
 			if (yb > ymax) yb = ymax;
 
 			int loop1 = yb - ya;
+#ifdef UNAI_DRAWSTATS
+			unai_drawCnt[11] += (unsigned)loop1;
+			if (unai_spanOff >= 3) continue;
+#endif
 			if (loop1 <= 0)
 				continue;
 
@@ -682,6 +694,10 @@ void gpuDrawPolyFT(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_qua
 				u32 u4, v4;
 
 				xa = FixedCeilToInt(x3);  xb = FixedCeilToInt(x4);
+				// 37 percent of the rows of a scene like this are empty; interpolating
+				// their gradients first and discarding them afterwards was pure loss.
+				// Clamping only narrows the span, so an empty one stays empty.
+				if (xa >= xb) continue;
 				u4 = u3;  v4 = v3;
 
 				fixed itmp = i2x(xa) - x3;
@@ -1013,6 +1029,10 @@ void gpuDrawPolyG(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_quad
 			if (yb > ymax) yb = ymax;
 
 			int loop1 = yb - ya;
+#ifdef UNAI_DRAWSTATS
+			unai_drawCnt[11] += (unsigned)loop1;
+			if (unai_spanOff >= 3) continue;
+#endif
 			if (loop1 <= 0)
 				continue;
 
@@ -1032,6 +1052,7 @@ void gpuDrawPolyG(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_quad
 
 				xa = FixedCeilToInt(x3);
 				xb = FixedCeilToInt(x4);
+				if (xa >= xb) continue;
 				r4 = r3;  g4 = g3;  b4 = b3;
 
 				fixed itmp = i2x(xa) - x3;
@@ -1412,6 +1433,10 @@ void gpuDrawPolyGT(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_qua
 			if (yb > ymax) yb = ymax;
 
 			int loop1 = yb - ya;
+#ifdef UNAI_DRAWSTATS
+			unai_drawCnt[11] += (unsigned)loop1;
+			if (unai_spanOff >= 3) continue;
+#endif
 			if (loop1 <= 0)
 				continue;
 
@@ -1433,6 +1458,7 @@ void gpuDrawPolyGT(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_qua
 
 				xa = FixedCeilToInt(x3);
 				xb = FixedCeilToInt(x4);
+				if (xa >= xb) continue;
 				u4 = u3;  v4 = v3;
 				r4 = r3;  g4 = g3;  b4 = b3;
 

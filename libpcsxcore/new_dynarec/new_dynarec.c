@@ -478,6 +478,22 @@ static void *get_direct_memhandler(void *table, u_int addr,
   enum stub_type type, uintptr_t *addr_host);
 static void cop2_do_stall_check(struct compile_state *st, u_int op, int i,
   const struct regstat *i_regs, u_int reglist);
+// The cheap reasons the self-modification check is skipped. Shared with the
+// prefetch that starts its cache line before the store rather than after it.
+static int store_smc_check_needed(struct compile_state *st, int i)
+{
+  if (HACK_ENABLED(NDHACK_NO_SMC_CHECK))
+    return 0;
+  // (naively) assume nobody will run code from stack
+  if (dops[i].rs1 == 29)
+    return 0;
+  // a later store through the same base will cover this one
+  if (i < st->slen - 1 && dops[i+1].is_store && dops[i+1].rs1 == dops[i].rs1
+      && abs(cinfo[i+1].imm - cinfo[i].imm) <= 32)
+    return 0;
+  return 1;
+}
+
 static void do_store_smc_check(struct compile_state *st, int i,
   const struct regstat *i_regs, u_int reglist, int addr_hr);
 static void pass_args(int a0, int a1);
@@ -3640,20 +3656,14 @@ static void do_invstub(struct compile_state *st, int n)
 static void do_store_smc_check(struct compile_state *st, int i,
   const struct regstat *i_regs, u_int reglist, int addr_hr)
 {
-  if (HACK_ENABLED(NDHACK_NO_SMC_CHECK))
+  if (!store_smc_check_needed(st, i))
     return;
   // this can't be used any more since we started to check exact
   // block boundaries in invalidate_range()
   //if (i_regs->waswritten & (1<<dops[i].rs1))
   //  return;
-  // (naively) assume nobody will run code from stack
-  if (dops[i].rs1 == 29)
-    return;
 
   int j, imm_maxdiff = 32, imm_min = cinfo[i].imm, imm_max = cinfo[i].imm, count = 1;
-  if (i < st->slen - 1 && dops[i+1].is_store && dops[i+1].rs1 == dops[i].rs1
-      && abs(cinfo[i+1].imm - cinfo[i].imm) <= imm_maxdiff)
-    return;
   for (j = i - 1; j >= 0; j--) {
     if (!dops[j].is_store || dops[j].rs1 != dops[i].rs1
         || abs(cinfo[j].imm - cinfo[j+1].imm) > imm_maxdiff)
@@ -3708,6 +3718,16 @@ static void store_assemble(struct compile_state *st, int i,
   assert(addr_hr >= 0);
   if(i_regs->regmap[HOST_CCREG]==CCREG) reglist&=~(1<<HOST_CCREG);
   reglist |= 1u << addr_hr;
+#if defined(HOST_IMM8)
+  // The invalid_code byte is read right after the store, and that megabyte
+  // table is almost never in the 16 KB cache. Start its line before the store.
+  if (((!c && !inline_slow_io) || is_ram_addr(saddr_const))
+      && store_smc_check_needed(st, i)) {
+    int ir_pf = get_reg(i_regs->regmap, INVCP);
+    if (ir_pf >= 0)
+      emit_prefetch_indexedsr12_reg(ir_pf, addr_hr);
+  }
+#endif
   if (!c && !inline_slow_io) {
     addr_hr_io = addr_hr;
     jaddr = emit_fastpath_cmp_jump(st, i, i_regs, addr_hr,

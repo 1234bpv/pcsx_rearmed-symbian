@@ -1415,6 +1415,14 @@ static void emit_ldrb_indexedsr12_reg(int base, int r, int rt)
   output_w32(0xe7d00000|rd_rn_rm(rt,base,r)|0x620);
 }
 
+// Same addressing as the load above, as a hint only: the invalid_code table
+// is a megabyte and its line is almost never in the 16 KB cache.
+static void emit_prefetch_indexedsr12_reg(int base, int r)
+{
+  assem_debug("pld %s,%s lsr #12\n",regname[base],regname[r]);
+  output_w32(0xf7d00000|rd_rn_rm(15,base,r)|0x620);
+}
+
 static void emit_callne(const void *a_)
 {
   int a = (int)a_;

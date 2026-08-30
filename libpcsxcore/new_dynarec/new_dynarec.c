@@ -3530,6 +3530,12 @@ static void load_assemble(struct compile_state *st, int i,
   default:
     assert(0);
   }
+#ifdef NDRC_LOAD_NOP_PROBE
+  // Measurement only: one filler between the guest load and its first use.
+  // If the run does not get slower, that slot was already a stall.
+  if (addr_hr_io >= 0 && !is_dummy)
+    emit_mov(13, 13);
+#endif
   if (addr_hr_io == HOST_TEMPREG || offset_reg == HOST_TEMPREG)
     host_tempreg_release();
   if (jaddr)

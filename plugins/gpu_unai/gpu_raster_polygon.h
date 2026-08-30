@@ -364,12 +364,17 @@ void gpuDrawPolyF(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_quad
 			int li=gpu_unai.inn.ilace_mask;
 			int pi=(ProgressiveInterlaceEnabled()?(gpu_unai.inn.ilace_mask+1):0);
 			int pif=(ProgressiveInterlaceEnabled()?(gpu_unai.prog_ilace_flag?(gpu_unai.inn.ilace_mask+1):0):1);
+			// Both row tests are dead unless interlacing is on, and li/pi/pif do not stay
+			// in registers here: one loop-invariant test saves two stack reads a row.
+			const int ilace = li | pi;
 
 			for (; loop1; --loop1, ya++, PixelBase += FRAME_WIDTH,
 					x3 += dx3, x4 += dx4 )
 			{
-				if (ya&li) continue;
-				if ((ya&pi)==pif) continue;
+				if (ilace) {
+					if (ya&li) continue;
+					if ((ya&pi)==pif) continue;
+				}
 
 				xa = FixedCeilToInt(x3);  xb = FixedCeilToInt(x4);
 				// 37 percent of the rows of a scene like this are empty; interpolating
@@ -683,13 +688,18 @@ void gpuDrawPolyFT(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_qua
 			int li=gpu_unai.inn.ilace_mask;
 			int pi=(ProgressiveInterlaceEnabled()?(gpu_unai.inn.ilace_mask+1):0);
 			int pif=(ProgressiveInterlaceEnabled()?(gpu_unai.prog_ilace_flag?(gpu_unai.inn.ilace_mask+1):0):1);
+			// Both row tests are dead unless interlacing is on, and li/pi/pif do not stay
+			// in registers here: one loop-invariant test saves two stack reads a row.
+			const int ilace = li | pi;
 
 			for (; loop1; --loop1, ++ya, PixelBase += FRAME_WIDTH,
 					x3 += dx3, x4 += dx4,
 					u3 += du3, v3 += dv3 )
 			{
-				if (ya&li) continue;
-				if ((ya&pi)==pif) continue;
+				if (ilace) {
+					if (ya&li) continue;
+					if ((ya&pi)==pif) continue;
+				}
 
 				u32 u4, v4;
 
@@ -1040,13 +1050,18 @@ void gpuDrawPolyG(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_quad
 			int li=gpu_unai.inn.ilace_mask;
 			int pi=(ProgressiveInterlaceEnabled()?(gpu_unai.inn.ilace_mask+1):0);
 			int pif=(ProgressiveInterlaceEnabled()?(gpu_unai.prog_ilace_flag?(gpu_unai.inn.ilace_mask+1):0):1);
+			// Both row tests are dead unless interlacing is on, and li/pi/pif do not stay
+			// in registers here: one loop-invariant test saves two stack reads a row.
+			const int ilace = li | pi;
 
 			for (; loop1; --loop1, ++ya, PixelBase += FRAME_WIDTH,
 					x3 += dx3, x4 += dx4,
 					r3 += dr3, g3 += dg3, b3 += db3 )
 			{
-				if (ya&li) continue;
-				if ((ya&pi)==pif) continue;
+				if (ilace) {
+					if (ya&li) continue;
+					if ((ya&pi)==pif) continue;
+				}
 
 				u32 r4, g4, b4;
 
@@ -1444,14 +1459,19 @@ void gpuDrawPolyGT(const PtrUnion packet, const PP gpuPolySpanDriver, u32 is_qua
 			int li=gpu_unai.inn.ilace_mask;
 			int pi=(ProgressiveInterlaceEnabled()?(gpu_unai.inn.ilace_mask+1):0);
 			int pif=(ProgressiveInterlaceEnabled()?(gpu_unai.prog_ilace_flag?(gpu_unai.inn.ilace_mask+1):0):1);
+			// Both row tests are dead unless interlacing is on, and li/pi/pif do not stay
+			// in registers here: one loop-invariant test saves two stack reads a row.
+			const int ilace = li | pi;
 
 			for (; loop1; --loop1, ++ya, PixelBase += FRAME_WIDTH,
 					x3 += dx3, x4 += dx4,
 					u3 += du3, v3 += dv3,
 					r3 += dr3, g3 += dg3, b3 += db3 )
 			{
-				if (ya&li) continue;
-				if ((ya&pi)==pif) continue;
+				if (ilace) {
+					if (ya&li) continue;
+					if ((ya&pi)==pif) continue;
+				}
 
 				u32 u4, v4;
 				u32 r4, g4, b4;

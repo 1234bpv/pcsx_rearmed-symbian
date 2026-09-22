@@ -649,7 +649,6 @@ endpolynotextnogou:
 				if (CF_DITHER) {
 					// GOURAUD, DITHER
 					uSrc = gpuLightingRGBDither(l_gCol, (s8)dv);
-					dv = (dv >> 8) | (dv << 24);
 				} else {
 					// GOURAUD, NO DITHER
 					uSrc = gpuLightingRGB(l_gCol);
@@ -661,6 +660,8 @@ endpolynotextnogou:
 				else            { *pDst = u16_to_le16(uSrc);          }
 
 endpolynotextgou:
+				// Dither follows screen X even when mask-check skipped the pixel.
+				if (CF_DITHER) dv = (dv >> 8) | (dv << 24);
 				pDst++;
 				l_gCol += l_gInc;
 			}

@@ -55,6 +55,14 @@ __attribute__((aligned(32)))
 SPUInfo         spu;
 SPUConfig       spu_config;
 
+#ifdef PS1_BENCH
+extern unsigned int ndrc_symbian_fastcount(void);
+unsigned long long g_spuCoreTicks;
+unsigned int g_spuCoreCalls, g_spuCoreActive, g_spuCoreSamples;
+#define SPU_CORE_TICK_END() \
+  (g_spuCoreTicks += (unsigned int)(ndrc_symbian_fastcount() - core_t0))
+#endif
+
 static int iFMod[NSSIZE];
 static int RVB[NSSIZE * 2];
 int ChanBuf[NSSIZE];
@@ -1002,12 +1010,19 @@ void do_samples(unsigned int cycles_to, int force_no_thread)
  unsigned int silentch;
  int cycle_diff;
  int ns_to;
+#ifdef PS1_BENCH
+ const unsigned int core_t0 = ndrc_symbian_fastcount();
+ g_spuCoreCalls++;
+#endif
 
  cycle_diff = cycles_to - spu.cycles_played;
  if (cycle_diff < -2*1048576 || cycle_diff > 2*1048576)
   {
    log_unhandled("desync %u %d\n", cycles_to, cycle_diff);
    spu.cycles_played = cycles_to;
+#ifdef PS1_BENCH
+   SPU_CORE_TICK_END();
+#endif
    return;
   }
 
@@ -1018,7 +1033,12 @@ void do_samples(unsigned int cycles_to, int force_no_thread)
   sync_worker_thread(force_no_thread);
 
  if (cycle_diff < 2 * 768)
-  return;
+  {
+#ifdef PS1_BENCH
+   SPU_CORE_TICK_END();
+#endif
+   return;
+  }
 
  ns_to = (cycle_diff / 768 + 1) & ~1;
  if (ns_to > NSSIZE) {
@@ -1026,6 +1046,10 @@ void do_samples(unsigned int cycles_to, int force_no_thread)
   log_unhandled("ns_to oflow %d %d\n", ns_to, NSSIZE);
   ns_to = NSSIZE;
  }
+#ifdef PS1_BENCH
+ g_spuCoreActive++;
+ g_spuCoreSamples += ns_to;
+#endif
 
   //////////////////////////////////////////////////////
   // special irq handling in the decode buffers (0x0000-0x1000)
@@ -1083,6 +1107,9 @@ void do_samples(unsigned int cycles_to, int force_no_thread)
   spu.cycles_played += ns_to * 768;
   spu.decode_pos = (spu.decode_pos + ns_to) & 0x1ff;
   spu.spuStat = (spu.spuStat & ~0x800) | ((spu.decode_pos << 3) & 0x800);
+#ifdef PS1_BENCH
+  SPU_CORE_TICK_END();
+#endif
 #if 0
   static int ccount; static time_t ctime; ccount++;
   if (time(NULL) != ctime)

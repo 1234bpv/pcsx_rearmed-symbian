@@ -57,6 +57,26 @@ int unai_dstFlat;
 le16_t unai_dstBuf[1024];
 #endif
 
+#ifdef UNAI_CF_PROFILE
+struct UnaiCfStat {
+	u32 calls, pixels;
+	u32 lengths[5]; // 1, 2, 3-4, 5-8, 9+
+};
+UnaiCfStat unai_cf_stats[2][1024]; // 0 C++, 1 ARM ASM
+static inline void unaiCfRecord(unsigned cf, u32 count, unsigned route)
+{
+	if (!count) return;
+	UnaiCfStat &s = unai_cf_stats[route][cf];
+	s.calls++;
+	s.pixels += count;
+	unsigned bucket = count <= 2 ? count - 1 : count <= 4 ? 2 : count <= 8 ? 3 : 4;
+	s.lengths[bucket]++;
+}
+#define UNAI_CF_RECORD(cf, count, route) unaiCfRecord(cf, count, route)
+#else
+#define UNAI_CF_RECORD(cf, count, route)
+#endif
+
 #include "gpu_inner_blend.h"
 #include "gpu_inner_quantization.h"
 #include "gpu_inner_light.h"
@@ -599,6 +619,7 @@ const PS gpuSpriteDrivers[256] = {
 template<int CF>
 static noinline void gpuPolySpanFn(const gpu_unai_t &gpu_unai, le16_t *pDst, u32 count, s32 y)
 {
+	UNAI_CF_RECORD(CF, count, 0);
 #ifndef PS1_NO_DIAG
 	if (unai_dstFlat) pDst = unai_dstBuf;
 #endif
@@ -794,39 +815,41 @@ static void PolySpanMaybeAsm(const gpu_unai_t &gpu_unai, le16_t *pDst, u32 count
 	if (unai_spanOff) return;
 #endif
 #define DV(y) gpu_unai.DitherLut32[y & 3]
+#define ASM_SPAN(call) do { UNAI_CF_RECORD(CF, count, 1); call; } while (0)
 	// [utx|Xbp]     - untextured, Xbpp
 	// l[0|1|g]      - modulation/lighting off|on|gouraud
 	// d[0|1]        - dither off/on
 	// st[d|0|1|2|3] - semitransparency mode disabled/0/1/2/3
 	switch (CF) {
-	case 0x002: poly_utx_l0d0m0st0_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x00a: poly_utx_l0d0m0st1_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x01a: poly_utx_l0d0m0st3_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x020: poly_4bp_l0d0m0std_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x022: poly_4bp_l0d0m0st0_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x040: poly_8bp_l0d0m0std_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x042: poly_8bp_l0d0m0st0_asm(pDst, &gpu_unai.inn, count); break;
+	case 0x002: ASM_SPAN(poly_utx_l0d0m0st0_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x00a: ASM_SPAN(poly_utx_l0d0m0st1_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x01a: ASM_SPAN(poly_utx_l0d0m0st3_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x020: ASM_SPAN(poly_4bp_l0d0m0std_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x022: ASM_SPAN(poly_4bp_l0d0m0st0_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x040: ASM_SPAN(poly_8bp_l0d0m0std_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x042: ASM_SPAN(poly_8bp_l0d0m0st0_asm(pDst, &gpu_unai.inn, count)); break;
 #ifdef HAVE_ARMV6
-	case 0x012: poly_utx_l0d0m0st2_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x021: poly_4bp_l1d0m0std_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x023: poly_4bp_l1d0m0st0_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x041: poly_8bp_l1d0m0std_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x043: poly_8bp_l1d0m0st0_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x081: poly_utx_g1d0m0std_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x0a1: poly_4bp_lgd0m0std_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x0ab: poly_4bp_lgd0m0st1_asm(pDst, &gpu_unai.inn, count); break;
-	case 0x221: poly_4bp_l1d1m0std_asm(pDst, &gpu_unai.inn, count, DV(y)); break;
-	case 0x223: poly_4bp_l1d1m0st0_asm(pDst, &gpu_unai.inn, count, DV(y)); break;
-	case 0x241: poly_8bp_l1d1m0std_asm(pDst, &gpu_unai.inn, count, DV(y)); break;
-	case 0x243: poly_8bp_l1d1m0st0_asm(pDst, &gpu_unai.inn, count, DV(y)); break;
-	case 0x281: poly_utx_g1d1m0std_asm(pDst, &gpu_unai.inn, count, DV(y)); break;
-	case 0x2a1: poly_4bp_lgd1m0std_asm(pDst, &gpu_unai.inn, count, DV(y)); break;
-	case 0x2ab: poly_4bp_lgd1m0st1_asm(pDst, &gpu_unai.inn, count, DV(y)); break;
-	case 0x381: poly_utx_g1d1m1std_asm(pDst, &gpu_unai.inn, count, DV(y)); break;
+	case 0x012: ASM_SPAN(poly_utx_l0d0m0st2_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x021: ASM_SPAN(poly_4bp_l1d0m0std_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x023: ASM_SPAN(poly_4bp_l1d0m0st0_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x041: ASM_SPAN(poly_8bp_l1d0m0std_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x043: ASM_SPAN(poly_8bp_l1d0m0st0_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x081: ASM_SPAN(poly_utx_g1d0m0std_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x0a1: ASM_SPAN(poly_4bp_lgd0m0std_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x0ab: ASM_SPAN(poly_4bp_lgd0m0st1_asm(pDst, &gpu_unai.inn, count)); break;
+	case 0x221: ASM_SPAN(poly_4bp_l1d1m0std_asm(pDst, &gpu_unai.inn, count, DV(y))); break;
+	case 0x223: ASM_SPAN(poly_4bp_l1d1m0st0_asm(pDst, &gpu_unai.inn, count, DV(y))); break;
+	case 0x241: ASM_SPAN(poly_8bp_l1d1m0std_asm(pDst, &gpu_unai.inn, count, DV(y))); break;
+	case 0x243: ASM_SPAN(poly_8bp_l1d1m0st0_asm(pDst, &gpu_unai.inn, count, DV(y))); break;
+	case 0x281: ASM_SPAN(poly_utx_g1d1m0std_asm(pDst, &gpu_unai.inn, count, DV(y))); break;
+	case 0x2a1: ASM_SPAN(poly_4bp_lgd1m0std_asm(pDst, &gpu_unai.inn, count, DV(y))); break;
+	case 0x2ab: ASM_SPAN(poly_4bp_lgd1m0st1_asm(pDst, &gpu_unai.inn, count, DV(y))); break;
+	case 0x381: ASM_SPAN(poly_utx_g1d1m1std_asm(pDst, &gpu_unai.inn, count, DV(y))); break;
 #endif
 	default:   gpuPolySpanFn<CF>(gpu_unai, pDst, count, y);
 	}
 #undef DV
+#undef ASM_SPAN
 }
 #endif
 

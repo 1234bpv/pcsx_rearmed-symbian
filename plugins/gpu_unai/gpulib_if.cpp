@@ -1049,3 +1049,35 @@ extern "C" void gpuUnaiSetDstFlat(int on)
   (void)on;
 #endif
 }
+
+// Full CF/length histogram is opt-in: the normal bench and release keep no
+// per-span counter writes. Direct C++ table entries and ASM wrappers both feed it.
+extern "C" int gpuUnaiCfEnabled(void)
+{
+#ifdef UNAI_CF_PROFILE
+  return 1;
+#else
+  return 0;
+#endif
+}
+
+extern "C" void gpuUnaiCfReset(void)
+{
+#ifdef UNAI_CF_PROFILE
+  memset(unai_cf_stats, 0, sizeof(unai_cf_stats));
+#endif
+}
+
+extern "C" int gpuUnaiCfGet(unsigned cf, int route, unsigned *out)
+{
+#ifdef UNAI_CF_PROFILE
+  if (!out || cf >= 1024 || route < 0 || route > 1) return 0;
+  const UnaiCfStat &s = unai_cf_stats[route][cf];
+  out[0] = s.calls; out[1] = s.pixels;
+  for (int i = 0; i < 5; i++) out[i + 2] = s.lengths[i];
+  return 1;
+#else
+  (void)cf; (void)route; (void)out;
+  return 0;
+#endif
+}

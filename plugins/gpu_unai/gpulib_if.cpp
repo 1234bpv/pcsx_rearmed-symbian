@@ -43,6 +43,42 @@
 #endif
 #include "gpu_inner.h"
 
+#ifdef UNAI_CF_TIME
+extern "C" unsigned int ndrc_symbian_fastcount(void);
+struct UnaiCfTimeStat {
+  unsigned long long ticks;
+  unsigned int primitives, sampled;
+};
+static UnaiCfTimeStat unai_cf_time[1024];
+static unsigned unai_cf_time_rng;
+static unsigned long long unai_cf_time_empty_ticks;
+static unsigned unai_cf_time_empty_calls;
+static inline int unaiCfTimeSelected(unsigned cf)
+{
+  return cf == 0x000 || cf == 0x02b || cf == 0x033 ||
+         cf == 0x04b || cf == 0x0a3 || cf == 0x0c1;
+}
+// Sample 1/16 primitives to keep the observer effect small. The full call
+// includes setup/clipping and spans; calibration removes the empty read pair.
+// No FastCounter read (or branch) remains in normal bench/release builds.
+#define UNAI_TIME_POLY(cf, call) do { \
+  const unsigned _cf = (cf); \
+  if (unaiCfTimeSelected(_cf)) { \
+    UnaiCfTimeStat &_s = unai_cf_time[_cf]; \
+    _s.primitives++; \
+    unai_cf_time_rng = unai_cf_time_rng * 1664525u + 1013904223u; \
+    if (((unai_cf_time_rng >> 24) & 15u) == 0) { \
+      const unsigned _t0 = ndrc_symbian_fastcount(); \
+      call; \
+      _s.ticks += ndrc_symbian_fastcount() - _t0; \
+      _s.sampled++; \
+    } else { call; } \
+  } else { call; } \
+} while (0)
+#else
+#define UNAI_TIME_POLY(cf, call) call
+#endif
+
 // GPU internal image drawing functions
 #include "gpu_raster_image.h"
 
@@ -425,14 +461,13 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
       case 0x21:
       case 0x22:
       case 0x23: {          // Monochrome 3-pt poly
-        PP driver = gpuPolySpanDrivers[
-          Blending_Mode |
-          gpu_unai.Masking | Blending | gpu_unai.PixelMSB
-        ];
+        u32 driver_idx = Blending_Mode |
+          gpu_unai.Masking | Blending | gpu_unai.PixelMSB;
+        PP driver = gpuPolySpanDrivers[driver_idx];
 #ifdef UNAI_DRAWSTATS
         unai_drawCnt[10]++;
 #endif
-        UNAI_POLY_PROBE gpuDrawPolyF(packet, driver, false);
+        UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyF(packet, driver, false));
         gput_sum(cpu_cycles_sum, cpu_cycles, gput_poly_base());
       } break;
 
@@ -459,7 +494,7 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
 #ifdef UNAI_DRAWSTATS
         unai_drawCnt[10]++;
 #endif
-        UNAI_POLY_PROBE gpuDrawPolyFT(packet, driver, false);
+        UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyFT(packet, driver, false));
         gput_sum(cpu_cycles_sum, cpu_cycles, gput_poly_base_t());
       } break;
 
@@ -467,14 +502,13 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
       case 0x29:
       case 0x2A:
       case 0x2B: {          // Monochrome 4-pt poly
-        PP driver = gpuPolySpanDrivers[
-          Blending_Mode |
-          gpu_unai.Masking | Blending | gpu_unai.PixelMSB
-        ];
+        u32 driver_idx = Blending_Mode |
+          gpu_unai.Masking | Blending | gpu_unai.PixelMSB;
+        PP driver = gpuPolySpanDrivers[driver_idx];
 #ifdef UNAI_DRAWSTATS
         unai_drawCnt[10]++;
 #endif
-        UNAI_POLY_PROBE gpuDrawPolyF(packet, driver, true); // is_quad = true
+        UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyF(packet, driver, true)); // is_quad = true
         gput_sum(cpu_cycles_sum, cpu_cycles, gput_quad_base());
       } break;
 
@@ -520,7 +554,7 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
 #ifdef UNAI_DRAWSTATS
         unai_drawCnt[10]++;
 #endif
-        UNAI_POLY_PROBE gpuDrawPolyFT(packet, driver, true); // is_quad = true
+        UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyFT(packet, driver, true)); // is_quad = true
         gput_sum(cpu_cycles_sum, cpu_cycles, gput_quad_base_t());
       } break;
 
@@ -541,23 +575,21 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
           if ((xor_ & HTOLE32(0xf8f8f8)) == 0)
             gouraud = 0;
         }
-        PP driver = gpuPolySpanDrivers[
-          dithering |
-          Blending_Mode |
-          gpu_unai.Masking | Blending | gouraud | gpu_unai.PixelMSB
-        ];
+        u32 driver_idx = dithering | Blending_Mode |
+          gpu_unai.Masking | Blending | gouraud | gpu_unai.PixelMSB;
+        PP driver = gpuPolySpanDrivers[driver_idx];
         if (gouraud)
             {
 #ifdef UNAI_DRAWSTATS
           unai_drawCnt[10]++;
 #endif
-          UNAI_POLY_PROBE gpuDrawPolyG(packet, driver, false); }
+          UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyG(packet, driver, false)); }
         else
             {
 #ifdef UNAI_DRAWSTATS
           unai_drawCnt[10]++;
 #endif
-          UNAI_POLY_PROBE gpuDrawPolyF(packet, driver, false, POLYTYPE_G); }
+          UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyF(packet, driver, false, POLYTYPE_G)); }
         gput_sum(cpu_cycles_sum, cpu_cycles, gput_poly_base_g());
       } break;
 
@@ -580,23 +612,21 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
               lighting = 0;
           }
         }
-        PP driver = gpuPolySpanDrivers[
-          dithering |
-          Blending_Mode | gpu_unai.TEXT_MODE |
-          gpu_unai.Masking | Blending | gouraud | lighting | gpu_unai.PixelMSB
-        ];
+        u32 driver_idx = dithering | Blending_Mode | gpu_unai.TEXT_MODE |
+          gpu_unai.Masking | Blending | gouraud | lighting | gpu_unai.PixelMSB;
+        PP driver = gpuPolySpanDrivers[driver_idx];
         if (gouraud)
             {
 #ifdef UNAI_DRAWSTATS
           unai_drawCnt[10]++;
 #endif
-          UNAI_POLY_PROBE gpuDrawPolyGT(packet, driver, false); } // is_quad = true
+          UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyGT(packet, driver, false)); } // is_quad = true
         else
             {
 #ifdef UNAI_DRAWSTATS
           unai_drawCnt[10]++;
 #endif
-          UNAI_POLY_PROBE gpuDrawPolyFT(packet, driver, false, POLYTYPE_GT); }
+          UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyFT(packet, driver, false, POLYTYPE_GT)); }
         gput_sum(cpu_cycles_sum, cpu_cycles, gput_poly_base_gt());
       } break;
 
@@ -614,23 +644,21 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
           if ((xor_ & HTOLE32(0xf8f8f8)) == 0)
             gouraud = 0;
         }
-        PP driver = gpuPolySpanDrivers[
-          dithering |
-          Blending_Mode |
-          gpu_unai.Masking | Blending | gouraud | gpu_unai.PixelMSB
-        ];
+        u32 driver_idx = dithering | Blending_Mode |
+          gpu_unai.Masking | Blending | gouraud | gpu_unai.PixelMSB;
+        PP driver = gpuPolySpanDrivers[driver_idx];
         if (gouraud)
             {
 #ifdef UNAI_DRAWSTATS
           unai_drawCnt[10]++;
 #endif
-          UNAI_POLY_PROBE gpuDrawPolyG(packet, driver, true); } // is_quad = true
+          UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyG(packet, driver, true)); } // is_quad = true
         else
             {
 #ifdef UNAI_DRAWSTATS
           unai_drawCnt[10]++;
 #endif
-          UNAI_POLY_PROBE gpuDrawPolyF(packet, driver, true, POLYTYPE_G); }
+          UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyF(packet, driver, true, POLYTYPE_G)); }
         gput_sum(cpu_cycles_sum, cpu_cycles, gput_quad_base_g());
       } break;
 
@@ -671,23 +699,21 @@ int renderer_do_cmd_list(u32 *list_, int list_len, uint32_t *ex_regs,
               lighting = 0;
           }
         }
-        PP driver = gpuPolySpanDrivers[
-          dithering |
-          Blending_Mode | gpu_unai.TEXT_MODE |
-          gpu_unai.Masking | Blending | gouraud | lighting | gpu_unai.PixelMSB
-        ];
+        u32 driver_idx = dithering | Blending_Mode | gpu_unai.TEXT_MODE |
+          gpu_unai.Masking | Blending | gouraud | lighting | gpu_unai.PixelMSB;
+        PP driver = gpuPolySpanDrivers[driver_idx];
         if (gouraud)
             {
 #ifdef UNAI_DRAWSTATS
           unai_drawCnt[10]++;
 #endif
-          UNAI_POLY_PROBE gpuDrawPolyGT(packet, driver, true); } // is_quad = true
+          UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyGT(packet, driver, true)); } // is_quad = true
         else
             {
 #ifdef UNAI_DRAWSTATS
           unai_drawCnt[10]++;
 #endif
-          UNAI_POLY_PROBE gpuDrawPolyFT(packet, driver, true, POLYTYPE_GT); }
+          UNAI_POLY_PROBE UNAI_TIME_POLY(driver_idx, gpuDrawPolyFT(packet, driver, true, POLYTYPE_GT)); }
         gput_sum(cpu_cycles_sum, cpu_cycles, gput_quad_base_gt());
       } break;
 
@@ -1079,5 +1105,55 @@ extern "C" int gpuUnaiCfGet(unsigned cf, int route, unsigned *out)
 #else
   (void)cf; (void)route; (void)out;
   return 0;
+#endif
+}
+
+extern "C" int gpuUnaiCfTimeEnabled(void)
+{
+#ifdef UNAI_CF_TIME
+  return 1;
+#else
+  return 0;
+#endif
+}
+
+extern "C" void gpuUnaiCfTimeReset(void)
+{
+#ifdef UNAI_CF_TIME
+  memset(unai_cf_time, 0, sizeof(unai_cf_time));
+  unai_cf_time_rng = 0x12345678u;
+  unai_cf_time_empty_ticks = 0;
+  unai_cf_time_empty_calls = 16384;
+  for (unsigned i = 0; i < unai_cf_time_empty_calls; i++) {
+    const unsigned t0 = ndrc_symbian_fastcount();
+    unai_cf_time_empty_ticks += ndrc_symbian_fastcount() - t0;
+  }
+#endif
+}
+
+extern "C" int gpuUnaiCfTimeGet(unsigned cf, unsigned long long *ticks,
+                                 unsigned *primitives, unsigned *sampled)
+{
+#ifdef UNAI_CF_TIME
+  if (cf >= 1024 || !ticks || !primitives || !sampled) return 0;
+  *ticks = unai_cf_time[cf].ticks;
+  *primitives = unai_cf_time[cf].primitives;
+  *sampled = unai_cf_time[cf].sampled;
+  return 1;
+#else
+  (void)cf; (void)ticks; (void)primitives; (void)sampled;
+  return 0;
+#endif
+}
+
+extern "C" void gpuUnaiCfTimeCalibration(unsigned long long *ticks,
+                                           unsigned *calls)
+{
+#ifdef UNAI_CF_TIME
+  if (ticks) *ticks = unai_cf_time_empty_ticks;
+  if (calls) *calls = unai_cf_time_empty_calls;
+#else
+  if (ticks) *ticks = 0;
+  if (calls) *calls = 0;
 #endif
 }

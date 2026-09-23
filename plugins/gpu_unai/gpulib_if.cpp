@@ -1020,7 +1020,9 @@ void renderer_set_config(const struct rearmed_cbs *cbs)
 extern unsigned int unai_drawCnt[12];
 extern int unai_spanOff;
 extern int unai_texFlat;
+#ifndef PS1_NO_DIAG
 extern int unai_dstFlat;
+#endif
 
 extern "C" void gpuUnaiDrawStats(unsigned int *out, int n)
 {
@@ -1041,5 +1043,9 @@ extern "C" void gpuUnaiSetTexFlat(int on)
 
 extern "C" void gpuUnaiSetDstFlat(int on)
 {
+#ifndef PS1_NO_DIAG
   unai_dstFlat = on;
+#else
+  (void)on;
+#endif
 }

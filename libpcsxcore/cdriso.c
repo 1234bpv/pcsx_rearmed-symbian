@@ -97,12 +97,17 @@ static int (*cdimg_read_sub_func)(FILE *f, int sector, void *dest);
 #ifdef __SYMBIAN32__
 // Single measurement point for all image formats so that .bin and compressed formats are compared
 // by the same metric: card read and inflate together.
-extern unsigned int ndrc_symbian_fastcount(void);
 unsigned long long g_cdReadTicks;
 unsigned int g_cdReadCount;
+#ifndef PS1_NO_DIAG
+extern unsigned int ndrc_symbian_fastcount(void);
 #define CDREAD_TICK_BEGIN { unsigned int t0_ = ndrc_symbian_fastcount();
 #define CDREAD_TICK_END   g_cdReadTicks += (unsigned int)(ndrc_symbian_fastcount() - t0_); \
                           g_cdReadCount++; }
+#else
+#define CDREAD_TICK_BEGIN
+#define CDREAD_TICK_END
+#endif
 #else
 #define CDREAD_TICK_BEGIN
 #define CDREAD_TICK_END

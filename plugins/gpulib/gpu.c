@@ -38,6 +38,12 @@ unsigned int g_gpulibStatusLast;
 extern unsigned int ndrc_symbian_fastcount(void);
 unsigned long long g_gpulibRenderTicks;
 
+#ifdef PS1_NO_DIAG
+#define GPU_DIAG(expr)
+#else
+#define GPU_DIAG(expr) expr
+#endif
+
 static noinline int do_cmd_buffer(struct psx_gpu *gpu, uint32_t *data, int count,
     int *cycles_sum, int *cycles_last);
 static noinline void finish_vram_transfer(struct psx_gpu *gpu, int is_read, int is_async);
@@ -389,7 +395,7 @@ void GPUwriteStatus(uint32_t data)
   uint32_t fb_dirty = 1, frame;
   int src_x, src_y, changed;
 
-  g_gpulibWriteStatus++;
+  GPU_DIAG(g_gpulibWriteStatus++;)
 
   if (cmd < ARRAY_SIZE(gpu.regs)) {
     if (cmd > 1 && cmd != 5 && gpu.regs[cmd] == data)
@@ -956,11 +962,11 @@ void GPUwriteDataMem(uint32_t *mem, int count)
 {
   int dummy = 0, left;
 
-  g_gpulibWriteDataMem++;
-  g_gpulibDmaWords += count;
+  GPU_DIAG(g_gpulibWriteDataMem++;)
+  GPU_DIAG(g_gpulibDmaWords += count;)
   log_io(&gpu, "gpu_dma_write %p %d cached %d\n", mem, count, gpu.cmd_len);
 
-  const unsigned int _rt0 = ndrc_symbian_fastcount();
+  GPU_DIAG(const unsigned int _rt0 = ndrc_symbian_fastcount();)
   if (unlikely(gpu.cmd_len > 0))
     flush_cmd_buffer(&gpu);
 
@@ -969,23 +975,23 @@ void GPUwriteDataMem(uint32_t *mem, int count)
     log_anomaly(&gpu, "GPUwriteDataMem: discarded %d/%d words\n", left, count);
 
   sync_ecmds_status_bits(&gpu);
-  g_gpulibRenderTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);
+  GPU_DIAG(g_gpulibRenderTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);)
 }
 
 void GPUwriteData(uint32_t data)
 {
-  g_gpulibWriteData++;
+  GPU_DIAG(g_gpulibWriteData++;)
   log_io(&gpu, "gpu_write %08x\n", data);
   // Third entry point of rasterization. Remained unmeasured for a long time, and from the fact that calls
   // here were 10x more frequent than in GPUwriteDataMem, it was concluded that the counter
   // underestimated by half. Calls are not equal: ONE word comes here, thousands go there.
-  const unsigned int _rt0 = ndrc_symbian_fastcount();
+  GPU_DIAG(const unsigned int _rt0 = ndrc_symbian_fastcount();)
   gpu.cmd_buffer[gpu.cmd_len++] = HTOLE32(data);
   if (gpu.cmd_len >= CMD_BUFFER_LEN) {
     flush_cmd_buffer(&gpu);
     sync_ecmds_status_bits(&gpu);
   }
-  g_gpulibRenderTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);
+  GPU_DIAG(g_gpulibRenderTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);)
 }
 
 long GPUdmaChain(uint32_t *rambase, uint32_t start_addr,
@@ -996,8 +1002,8 @@ long GPUdmaChain(uint32_t *rambase, uint32_t start_addr,
   int cpu_cycles_sum = 0;
   int cpu_cycles_last = 0;
 
-  g_gpulibDmaChain++;
-  const unsigned int _rt0 = ndrc_symbian_fastcount();
+  GPU_DIAG(g_gpulibDmaChain++;)
+  GPU_DIAG(const unsigned int _rt0 = ndrc_symbian_fastcount();)
   preload(rambase + (start_addr & 0x1fffff) / 4);
 
   if (unlikely(gpu.cmd_len > 0))
@@ -1066,7 +1072,7 @@ long GPUdmaChain(uint32_t *rambase, uint32_t start_addr,
   if (progress_addr)
     *progress_addr = addr;
   *cycles_last_cmd = cpu_cycles_last;
-  g_gpulibRenderTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);
+  GPU_DIAG(g_gpulibRenderTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);)
   return cpu_cycles_sum;
 }
 
@@ -1113,8 +1119,8 @@ uint32_t GPUreadStatus(void)
   }
 
   ret = gpu.status;
-  g_gpulibReadStatus++;
-  g_gpulibStatusLast = ret;
+  GPU_DIAG(g_gpulibReadStatus++;)
+  GPU_DIAG(g_gpulibStatusLast = ret;)
   log_io(&gpu, "gpu_read_status %08x\n", ret);
   return ret;
 }

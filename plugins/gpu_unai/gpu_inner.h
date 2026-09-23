@@ -52,8 +52,10 @@ int unai_texFlat;
 // Companion probe: sends every span to one scratch row instead of the frame
 // buffer, which prices the destination writes the same way texFlat prices the
 // texel reads. Wide enough for the longest span the PS1 can ask for.
+#ifndef PS1_NO_DIAG
 int unai_dstFlat;
 le16_t unai_dstBuf[1024];
+#endif
 
 #include "gpu_inner_blend.h"
 #include "gpu_inner_quantization.h"
@@ -597,7 +599,9 @@ const PS gpuSpriteDrivers[256] = {
 template<int CF>
 static noinline void gpuPolySpanFn(const gpu_unai_t &gpu_unai, le16_t *pDst, u32 count, s32 y)
 {
+#ifndef PS1_NO_DIAG
 	if (unai_dstFlat) pDst = unai_dstBuf;
+#endif
 	bool should_blend;
 	s16 DitherLut16[4];
 
@@ -778,7 +782,9 @@ endpolytext:
 template<int CF>
 static void PolySpanMaybeAsm(const gpu_unai_t &gpu_unai, le16_t *pDst, u32 count, s32 y)
 {
+#ifndef PS1_NO_DIAG
 	if (unai_dstFlat) pDst = unai_dstBuf;
+#endif
 #ifdef UNAI_DRAWSTATS
 	unai_drawCnt[0]++;
 	unai_drawCnt[1] += count;

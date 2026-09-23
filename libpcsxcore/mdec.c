@@ -22,9 +22,11 @@
 
 // MDEC profiling: video decoding time (rl2blk + IDCT + yuv2rgb) and output
 // data size. The hook is the same as for rasterization in gpulib.
-extern unsigned int ndrc_symbian_fastcount(void);
 unsigned long long g_mdecDecodeTicks;
 unsigned int g_mdecWords;
+#ifndef PS1_NO_DIAG
+extern unsigned int ndrc_symbian_fastcount(void);
+#endif
 
 /* memory speed is 1 byte per MDEC_BIAS psx clock
  * That mean (PSXCLK / MDEC_BIAS) B/s
@@ -573,7 +575,9 @@ void psxDma1(u32 adr, u32 bcr, u32 chcr) {
 	int blk[DSIZE2 * 6];
 	u8 * image;
 	int size;
+#ifndef PS1_NO_DIAG
 	unsigned int _rt0;
+#endif
 
 	if (chcr != 0x01000200) {
 		log_unhandled("mdec1: invalid dma %08x\n", chcr);
@@ -601,8 +605,10 @@ void psxDma1(u32 adr, u32 bcr, u32 chcr) {
 		return;
 	}
 
+#ifndef PS1_NO_DIAG
 	_rt0 = ndrc_symbian_fastcount();
 	g_mdecWords += words;
+#endif
 
 	if (mdec.reg0 & MDEC0_RGB24) {
 		/* 16 bits decoding
@@ -662,7 +668,9 @@ void psxDma1(u32 adr, u32 bcr, u32 chcr) {
 			mdec.block_buffer_pos = mdec.block_buffer + size;
 		}
 	}
+#ifndef PS1_NO_DIAG
 	g_mdecDecodeTicks += (unsigned int)(ndrc_symbian_fastcount() - _rt0);
+#endif
 
 	if (size < 0)
 		log_unhandled("mdec: bork\n");

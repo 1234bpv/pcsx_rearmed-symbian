@@ -140,6 +140,12 @@ extern uintptr_t mini_ht[32][2];
 
 struct ndrc_globals ndrc_g;
 
+#if defined(__SYMBIAN32__) && defined(__arm__) && !defined(PS1_NO_DIAG)
+// Counts generated instructions, not executions. Used to decide whether the
+// narrow LUI materialisation experiment is worth a runtime A/B on ARM11.
+unsigned int g_ndrcLuiEmitted, g_ndrcLuiWouldLiteral, g_ndrcLuiTwoByte;
+#endif
+
 struct ndrc_tramp
 {
   struct tramp_insns ops[2048 / sizeof(struct tramp_insns)];
@@ -2893,8 +2899,18 @@ static void imm16_assemble(int i, const struct regstat *i_regs, int ccadj_)
       t=get_reg_w(i_regs->regmap, dops[i].rt1);
       //assert(t>=0);
       if(t>=0) {
-        if(!((i_regs->isconst>>t)&1))
+        if(!((i_regs->isconst>>t)&1)) {
+#if defined(__SYMBIAN32__) && defined(__arm__) && !defined(PS1_NO_DIAG)
+          u_int armval, val = (u_int)cinfo[i].imm << 16;
+          g_ndrcLuiEmitted++;
+          if (!genimm(val, &armval) && !genimm(~val, &armval)) {
+            g_ndrcLuiWouldLiteral++;
+            if ((val & 0xff000000u) && (val & 0x00ff0000u))
+              g_ndrcLuiTwoByte++;
+          }
+#endif
           emit_movimm(cinfo[i].imm<<16,t);
+        }
       }
     }
   }

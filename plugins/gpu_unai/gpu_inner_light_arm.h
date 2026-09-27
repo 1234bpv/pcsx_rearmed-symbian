@@ -74,9 +74,8 @@ GPU_INLINE u32 gpuLightingTXTARM(u32 uSrc, u32 bgr0888)
 
 GPU_INLINE u32 gpuLightingTXTGouraudARM(u32 uSrc, gcol_t gCol)
 {
-	u32 r, g, s_d = uSrc;
-	asm("str    %[b],   [sp, #-4]!\n"        // conserve regs for gcc
-	    "uxtb16 %[b],   %[b],    ror #8\n"   // b = g_rg >> 8 & 0xff00ff
+	u32 r, g, s_d = uSrc, b = gCol.raw32[0];
+	asm("uxtb16 %[b],   %[b],    ror #8\n"   // b = g_rg >> 8 & 0xff00ff
 	    "and    %[r],   %[s_d],  #0x001f\n"
 	    "and    %[g],   %[s_d],  #0x03e0\n"
 	    "smulbb %[r],   %[r],    %[b]\n"
@@ -91,9 +90,8 @@ GPU_INLINE u32 gpuLightingTXTGouraudARM(u32 uSrc, gcol_t gCol)
 	    "orrne  %[s_d], %[s_d],  #0x8000\n"
 	    "orr    %[s_d], %[s_d],  %[g], lsl #5\n"
 	    "orr    %[s_d], %[s_d],  %[b], lsl #10\n"
-	    "ldr    %[b],   [sp], #4\n"
-	  : [s_d]"+r"(s_d), [r]"=&r"(r), [g]"=&r"(g)
-	  : [b]"r"(gCol.raw32[0]), [g_b]"r"(gCol.raw32[1])
+	  : [s_d]"+r"(s_d), [r]"=&r"(r), [g]"=&r"(g), [b]"+&r"(b)
+	  : [g_b]"r"(gCol.raw32[1])
 	  : "cc");
 	return s_d;
 }

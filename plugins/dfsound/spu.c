@@ -61,6 +61,84 @@ unsigned long long g_spuCoreTicks;
 unsigned int g_spuCoreCalls, g_spuCoreActive, g_spuCoreSamples;
 #define SPU_CORE_TICK_END() \
   (g_spuCoreTicks += (unsigned int)(ndrc_symbian_fastcount() - core_t0))
+
+enum {
+  SPU_STAGE_DECODE_ADPCM = 0,
+  SPU_STAGE_DECODE_NOISE,
+  SPU_STAGE_ADSR,
+  SPU_STAGE_MIX_PLAIN,
+  SPU_STAGE_MIX_RVB,
+  SPU_STAGE_REVERB,
+  SPU_STAGE_COUNT
+};
+
+#ifdef PS1_SPU_STAGE_PROFILE
+struct SpuStageStat {
+  unsigned long long ticks;
+  unsigned int calls;
+  unsigned int sampled;
+  unsigned int samples;
+};
+
+static struct SpuStageStat g_spuStageStats[SPU_STAGE_COUNT];
+static unsigned int g_spuStageVoiceSeq;
+static unsigned int g_spuStageRvbSeq;
+static unsigned long long g_spuStageEmptyTicks;
+static unsigned int g_spuStageEmptyCalls;
+#endif
+
+int spuStageProfileEnabled(void)
+{
+#ifdef PS1_SPU_STAGE_PROFILE
+  return 1;
+#else
+  return 0;
+#endif
+}
+
+void spuStageProfileReset(void)
+{
+#ifdef PS1_SPU_STAGE_PROFILE
+  unsigned int i;
+  memset(g_spuStageStats, 0, sizeof(g_spuStageStats));
+  g_spuStageVoiceSeq = 0;
+  g_spuStageRvbSeq = 0;
+  g_spuStageEmptyTicks = 0;
+  g_spuStageEmptyCalls = 16384;
+  for (i = 0; i < g_spuStageEmptyCalls; i++) {
+    const unsigned int t0 = ndrc_symbian_fastcount();
+    g_spuStageEmptyTicks += (unsigned int)(ndrc_symbian_fastcount() - t0);
+  }
+#endif
+}
+
+int spuStageProfileGet(unsigned int stage, unsigned long long *ticks,
+                       unsigned int *calls, unsigned int *sampled, unsigned int *samples)
+{
+#ifdef PS1_SPU_STAGE_PROFILE
+  if (stage >= SPU_STAGE_COUNT || !ticks || !calls || !sampled || !samples)
+    return 0;
+  *ticks = g_spuStageStats[stage].ticks;
+  *calls = g_spuStageStats[stage].calls;
+  *sampled = g_spuStageStats[stage].sampled;
+  *samples = g_spuStageStats[stage].samples;
+  return 1;
+#else
+  (void)stage; (void)ticks; (void)calls; (void)sampled; (void)samples;
+  return 0;
+#endif
+}
+
+void spuStageProfileCalibration(unsigned long long *ticks, unsigned int *calls)
+{
+#ifdef PS1_SPU_STAGE_PROFILE
+  if (ticks) *ticks = g_spuStageEmptyTicks;
+  if (calls) *calls = g_spuStageEmptyCalls;
+#else
+  if (ticks) *ticks = 0;
+  if (calls) *calls = 0;
+#endif
+}
 #endif
 
 static int iFMod[NSSIZE];
@@ -654,6 +732,87 @@ static void do_channels(int ns_to)
    if (!(mask & 1)) continue;                      // channel not playing? next
 
    s_chan = &spu.s_chan[ch];
+#ifdef PS1_SPU_STAGE_PROFILE
+   {
+    const unsigned int vseq = g_spuStageVoiceSeq++;
+    const int sample_voice = ((vseq & 15u) == 0);
+    const int is_noise = s_chan->bNoise != 0;
+    const unsigned int dec_stage = is_noise ? SPU_STAGE_DECODE_NOISE : SPU_STAGE_DECODE_ADPCM;
+
+    g_spuStageStats[dec_stage].calls++;
+    g_spuStageStats[dec_stage].samples += ns_to;
+    if (sample_voice) {
+     const unsigned int t0 = ndrc_symbian_fastcount();
+     if (is_noise)
+      d = do_samples_noise(ChanBuf, ch, ns_to);
+     else
+      d = do_samples_adpcm(ChanBuf, decode_block, NULL, ch, ns_to, s_chan->bFMod,
+            &spu.sb[ch], s_chan->sinc, &s_chan->spos, &s_chan->iSBPos);
+     g_spuStageStats[dec_stage].ticks += (unsigned int)(ndrc_symbian_fastcount() - t0);
+     g_spuStageStats[dec_stage].sampled++;
+    } else {
+     if (is_noise)
+      d = do_samples_noise(ChanBuf, ch, ns_to);
+     else
+      d = do_samples_adpcm(ChanBuf, decode_block, NULL, ch, ns_to, s_chan->bFMod,
+            &spu.sb[ch], s_chan->sinc, &s_chan->spos, &s_chan->iSBPos);
+    }
+
+    if (!s_chan->bStarting) {
+     g_spuStageStats[SPU_STAGE_ADSR].calls++;
+     g_spuStageStats[SPU_STAGE_ADSR].samples += d;
+     if (sample_voice) {
+      const unsigned int t0 = ndrc_symbian_fastcount();
+      d = MixADSR(ChanBuf, &s_chan->ADSRX, d);
+      g_spuStageStats[SPU_STAGE_ADSR].ticks += (unsigned int)(ndrc_symbian_fastcount() - t0);
+      g_spuStageStats[SPU_STAGE_ADSR].sampled++;
+     } else {
+      d = MixADSR(ChanBuf, &s_chan->ADSRX, d);
+     }
+     if (d < ns_to) {
+      spu.dwChannelsAudible &= ~(1 << ch);
+      s_chan->ADSRX.State = ADSR_RELEASE;
+      s_chan->ADSRX.EnvelopeVol = 0;
+      memset(&ChanBuf[d], 0, (ns_to - d) * sizeof(ChanBuf[0]));
+     }
+    }
+
+    if (ch == 1 || ch == 3)
+     {
+      do_decode_bufs(spu.spuMem, ch/2, ns_to, spu.decode_pos);
+      spu.decode_dirty_ch |= 1 << ch;
+     }
+
+    if (s_chan->bFMod == 2)                         // fmod freq channel
+     memcpy(iFMod, &ChanBuf, ns_to * sizeof(iFMod[0]));
+
+    if (!(spu.spuCtrl & CTRL_MUTE))
+     ;
+    else if (s_chan->bRVBActive && do_rvb) {
+     g_spuStageStats[SPU_STAGE_MIX_RVB].calls++;
+     g_spuStageStats[SPU_STAGE_MIX_RVB].samples += ns_to;
+     if (sample_voice) {
+      const unsigned int t0 = ndrc_symbian_fastcount();
+      mix_chan_rvb(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume, RVB);
+      g_spuStageStats[SPU_STAGE_MIX_RVB].ticks += (unsigned int)(ndrc_symbian_fastcount() - t0);
+      g_spuStageStats[SPU_STAGE_MIX_RVB].sampled++;
+     } else {
+      mix_chan_rvb(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume, RVB);
+     }
+    } else {
+     g_spuStageStats[SPU_STAGE_MIX_PLAIN].calls++;
+     g_spuStageStats[SPU_STAGE_MIX_PLAIN].samples += ns_to;
+     if (sample_voice) {
+      const unsigned int t0 = ndrc_symbian_fastcount();
+      mix_chan(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume);
+      g_spuStageStats[SPU_STAGE_MIX_PLAIN].ticks += (unsigned int)(ndrc_symbian_fastcount() - t0);
+      g_spuStageStats[SPU_STAGE_MIX_PLAIN].sampled++;
+     } else {
+      mix_chan(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume);
+     }
+    }
+   }
+#else
    if (s_chan->bNoise)
     d = do_samples_noise(ChanBuf, ch, ns_to);
    else
@@ -684,13 +843,30 @@ static void do_channels(int ns_to)
     mix_chan_rvb(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume, RVB);
    else
     mix_chan(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume);
+#endif
   }
 
   MixCD(spu.SSumLR, RVB, ns_to, spu.decode_pos);
 
   if (spu.rvb->StartAddr) {
-   if (do_rvb)
+   if (do_rvb) {
+#ifdef PS1_SPU_STAGE_PROFILE
+    const unsigned int rseq = g_spuStageRvbSeq++;
+    const int sample_rvb = ((rseq & 15u) == 0);
+    g_spuStageStats[SPU_STAGE_REVERB].calls++;
+    g_spuStageStats[SPU_STAGE_REVERB].samples += ns_to;
+    if (sample_rvb) {
+     const unsigned int t0 = ndrc_symbian_fastcount();
+     REVERBDo(spu.SSumLR, RVB, ns_to, spu.rvb->CurrAddr);
+     g_spuStageStats[SPU_STAGE_REVERB].ticks += (unsigned int)(ndrc_symbian_fastcount() - t0);
+     g_spuStageStats[SPU_STAGE_REVERB].sampled++;
+    } else {
+     REVERBDo(spu.SSumLR, RVB, ns_to, spu.rvb->CurrAddr);
+    }
+#else
     REVERBDo(spu.SSumLR, RVB, ns_to, spu.rvb->CurrAddr);
+#endif
+   }
 
    spu.rvb->CurrAddr += ns_to / 2;
    while (spu.rvb->CurrAddr >= 0x40000)

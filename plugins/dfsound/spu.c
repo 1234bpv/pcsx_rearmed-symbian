@@ -284,6 +284,18 @@ INLINE int interp_gauss_get(const short * __restrict__ sb, int sbpos, int spos)
  return vr >> 15;
 }
 
+// ADPCM-KERNEL-BEGIN
+#ifdef HAVE_ARMV6
+ // Operands are sign-extended 16-bit values here, so the 16x16 multiply is exact.
+ #define adpcm_mul(a, b) ({ int r_; asm("smulbb %0,%1,%2" : "=r" (r_) : "r" (a), "r" (b)); r_; })
+#else
+ #define adpcm_mul(a, b) ((a) * (b))
+#endif
+
+// One sample: the s_2 term does not depend on the previous result, so it stays
+// off the critical path. nib holds the nibble in bits 28-31.
+#define adpcm_step(out, p2, p1, nib) do {   out  = ((int)(nib) >> sh) + (adpcm_mul(p2, f1) >> 6);   out += adpcm_mul(p1, f0) >> 6;   ssat32_to_16(out);  } while (0)
+
 static void decode_block_data(short *dest, const unsigned char *src,
   int predict_nr, int shift_factor)
 {
@@ -294,33 +306,30 @@ static void decode_block_data(short *dest, const unsigned char *src,
     {   98, -55 },
     {  122, -60 }
  };
- int nSample;
- int fa, s_1, s_2, d, s;
+ const int f0 = f[predict_nr][0];
+ const int f1 = f[predict_nr][1];
+ // (short)(nibble << 12) >> shift_factor, folded into one arithmetic shift
+ const int sh = 16 + shift_factor;
+ int n, t0, t1, t2, t3, s_1, s_2;
 
  s_1 = dest[27];
  s_2 = dest[26];
 
- for (nSample = 0; nSample < 28; src++)
+ for (n = 0; n < 7; n++, src += 2, dest += 4)
  {
-  d = (int)*src;
-  s = (int)(signed short)((d & 0x0f) << 12);
+  unsigned e0 = (unsigned)src[0] << 24;
+  unsigned e1 = (unsigned)src[1] << 24;
 
-  fa  = s >> shift_factor;
-  fa += ((s_1 * f[predict_nr][0])>>6) + ((s_2 * f[predict_nr][1])>>6);
-  ssat32_to_16(fa);
-  s_2 = s_1; s_1 = fa;
+  adpcm_step(t0, s_2, s_1, e0 << 4);
+  adpcm_step(t1, s_1, t0,  e0 & 0xf0000000);
+  adpcm_step(t2, t0,  t1,  e1 << 4);
+  adpcm_step(t3, t1,  t2,  e1 & 0xf0000000);
+  s_2 = t2; s_1 = t3;
 
-  dest[nSample++] = fa;
-
-  s = (int)(signed short)((d & 0xf0) << 8);
-  fa  = s >> shift_factor;
-  fa += ((s_1 * f[predict_nr][0])>>6) + ((s_2 * f[predict_nr][1])>>6);
-  ssat32_to_16(fa);
-  s_2 = s_1; s_1 = fa;
-
-  dest[nSample++] = fa;
+  dest[0] = t0; dest[1] = t1; dest[2] = t2; dest[3] = t3;
  }
 }
+// ADPCM-KERNEL-END
 
 static int decode_block(void *unused, int ch, sample_buf *sb)
 {

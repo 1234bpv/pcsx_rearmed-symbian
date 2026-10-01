@@ -1645,6 +1645,24 @@ static void mov_loadtype_adj(enum stub_type type,int rs,int rt)
 #include "pcsxmem.h"
 #include "pcsxmem_inline.c"
 
+#ifdef PS1_STAGE2_PROFILE
+// D1 counter. Emitted at the head of a slow-path stub, before anything of the
+// stub's own has been saved, so the scratch area at fp is free to use. rs is
+// added to the saved set because it can be the host temp (lr), which the call clobbers.
+static void s2_emit_slow_count(int rs, int is_write)
+{
+  const u_int save = CALLER_SAVE_REGS | (1u << rs);
+  if (!ndrc_s2_d1)
+    return;
+  save_regs_all(save);
+  if (rs != 0)
+    emit_mov(rs, 0);
+  emit_movimm(is_write, 1);
+  emit_far_call(ndrc_s2_slow_count);
+  restore_regs_all(save);
+}
+#endif
+
 static void do_read_slow(struct compile_state *st, int i, const struct regstat *i_regs,
   enum stub_type type, void *retaddr, int rs, int ccadj, u_int reglist)
 {
@@ -1654,6 +1672,9 @@ static void do_read_slow(struct compile_state *st, int i, const struct regstat *
   int r, temp = -1, temp2 = HOST_TEMPREG, regs_saved = 0;
   void *restore_jump = NULL, *end_jump = NULL;
   assert(rs >= 0);
+#ifdef PS1_STAGE2_PROFILE
+  s2_emit_slow_count(rs, 0);
+#endif
   reglist |= 1 << rs;
   for(r=0;r<=12;r++) {
     if(((1<<r)&0x13ff)&&((1<<r)&reglist)==0) {
@@ -1825,6 +1846,9 @@ static void do_write_slow(struct compile_state *st, int i, const struct regstat 
   int jmp2_cond, reglist2 = reglist | (1<<rs) | (1<<rt);
   assert(rs >= 0);
   assert(rt >= 0);
+#ifdef PS1_STAGE2_PROFILE
+  s2_emit_slow_count(rs, 1);
+#endif
   for(rtmp=0;rtmp<=12;rtmp++) {
     if(((1<<rtmp)&0x13ff)&&((1<<rtmp)&reglist2)==0) {
       temp=rtmp; break;

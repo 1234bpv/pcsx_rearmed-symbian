@@ -359,6 +359,33 @@ static struct compile_info
   #define stat_clear(s)
 #endif
 
+#ifdef PS1_STAGE2_PROFILE
+// Bench-only counters read by src/symbian/stage1.cpp (event s2dyn).
+extern unsigned int ndrc_symbian_fastcount(void);
+unsigned int g_s2_rc_ticks, g_s2_rc_blocks, g_s2_rc_fail;          // new_recompile_block
+unsigned int g_s2_ht_live, g_s2_ht_hit0, g_s2_ht_hit1, g_s2_ht_slow; // ndrc_get_addr_ht_param
+unsigned int g_s2_links;                                            // ndrc_patch_link
+// Slow-path memory accesses by guest address class, [read, write][class]:
+// 0 scratchpad 1f800000+0x400, 1 scratchpad tail, 2 I/O 1f801000, 3 BIOS, 4 RAM, 5 other.
+// Set ndrc_s2_d1 before the first block is compiled: the counting call is emitted
+// into every slow stub, which is too costly to leave on for the time profile.
+int ndrc_s2_d1;
+unsigned int g_s2_slow[2][6];
+
+void ndrc_s2_slow_count(u_int addr, u_int is_write)
+{
+  u_int a = addr & 0x1fffffff;
+  u_int c;
+  if (a - 0x1f800000u < 0x400u && (addr >> 29) != 5) c = 0;
+  else if (a - 0x1f800000u < 0x1000u) c = 1;
+  else if (a - 0x1f801000u < 0x1000u) c = 2;
+  else if (a - 0x1fc00000u < 0x80000u) c = 3;
+  else if (a < 0x800000u) c = 4;
+  else c = 5;
+  g_s2_slow[is_write][c]++;
+}
+#endif
+
 struct compile_state
 {
   u_int *source;
@@ -1172,8 +1199,18 @@ void *ndrc_get_addr_ht_param(struct ht_entry *ht, unsigned int vaddr,
   const struct ht_entry *ht_bin = hash_table_get_p(ht, vaddr);
   u_int vaddr_a = vaddr & ~3;
   stat_inc(stat_ht_lookups);
+#ifdef PS1_STAGE2_PROFILE
+  // live = called from running code (mini_ht miss, block exit, cc_interrupt),
+  // as opposed to dyna_linker's no_compile probes at link time.
+  const u_int s2_live = (compile_mode == ndrc_cm_compile_live);
+  g_s2_ht_live += s2_live;
+  if (ht_bin->vaddr[0] == vaddr_a) { g_s2_ht_hit0 += s2_live; return ht_bin->tcaddr[0]; }
+  if (ht_bin->vaddr[1] == vaddr_a) { g_s2_ht_hit1 += s2_live; return ht_bin->tcaddr[1]; }
+  g_s2_ht_slow += s2_live;
+#else
   if (ht_bin->vaddr[0] == vaddr_a) return ht_bin->tcaddr[0];
   if (ht_bin->vaddr[1] == vaddr_a) return ht_bin->tcaddr[1];
+#endif
   return get_addr(ht, vaddr, compile_mode);
 }
 
@@ -2024,6 +2061,9 @@ oom:
 void ndrc_patch_link(u_int vaddr, void *insn, void *stub, void *target)
 {
   void *insn_end = (char *)insn + 4;
+#ifdef PS1_STAGE2_PROFILE
+  g_s2_links++;
+#endif
 
   //start_tcache_write(insn, insn_end);
   mprotect_w_x(insn, insn_end, 0);
@@ -9684,6 +9724,9 @@ static void block_info_finish(const struct compile_state *st,
   perf_dump_write(st, beginning, end);
 }
 
+#ifdef PS1_STAGE2_PROFILE
+#define new_recompile_block new_recompile_block_impl
+#endif
 static int noinline new_recompile_block(u_int addr)
 {
   // Not on the stack: the four MAXBLOCK arrays inside make it about 64K, and
@@ -10146,5 +10189,19 @@ static int noinline new_recompile_block(u_int addr)
   NDRC_DBG_PASS(0);   // zero = recompiler is idle; otherwise the trace is indistinguishable from leftover
   return 0;
 }
+
+#ifdef PS1_STAGE2_PROFILE
+#undef new_recompile_block
+// Whole-block recompile time. FastCounter is 32768 Hz, so a single block is rounded to
+// 30 us, but the phase is random and the sum is unbiased.
+static int new_recompile_block(u_int addr)
+{
+  const unsigned int t0 = ndrc_symbian_fastcount();
+  const int r = new_recompile_block_impl(addr);
+  g_s2_rc_ticks += ndrc_symbian_fastcount() - t0;
+  if (r == 0) g_s2_rc_blocks++; else g_s2_rc_fail++;
+  return r;
+}
+#endif
 
 // vim:shiftwidth=2:expandtab

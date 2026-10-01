@@ -560,7 +560,7 @@ void gpuSendPacketFunction(const int PRIM)
 
 		case 0x7C:
 		case 0x7D:
-			#ifdef __arm__
+			#ifdef GPU_UNAI_ARM_ASM
 			/* Notaz 4bit sprites optimization */
 			if ((!gpu_unai.frameskip.skipGPU) && (!(gpu_unai.GPU_GP1&0x180)) && (!(gpu_unai.Masking|gpu_unai.PixelMSB)))
 			{

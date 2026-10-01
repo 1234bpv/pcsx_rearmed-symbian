@@ -40,7 +40,14 @@ static void ari64_thread_sync(void);
 
 // Pre-compiling the saved blocks crashes on Symbian; measured to be the only
 // section of LoadState that dies. Blocks are recompiled on demand anyway.
+// Cause not found; the blkload command line argument re-enables it for study.
 int ndrc_skip_load_blocks = 1;
+
+#ifdef PS1_NO_DIAG
+#define NDRC_TRACE(...)
+#else
+#define NDRC_TRACE(...) SysPrintf(__VA_ARGS__)
+#endif
 
 void ndrc_freeze(void *f, int mode)
 {
@@ -84,10 +91,10 @@ void ndrc_freeze(void *f, int mode)
 				size = 0;
 		} while (0);
 
-		SysPrintf("ndrc: load blocks size=%d skip=%d\n", size, ndrc_skip_load_blocks);
+		NDRC_TRACE("ndrc: load blocks size=%d skip=%d\n", size, ndrc_skip_load_blocks);
 		if (psxCpu != &psxInt && !ndrc_skip_load_blocks)
 			new_dynarec_load_blocks(addrs, size);
-		SysPrintf("ndrc: load blocks done\n");
+		NDRC_TRACE("ndrc: load blocks done\n");
 	}
 
 	//printf("drc: %d block info entries %s\n", size/8, mode ? "saved" : "loaded");

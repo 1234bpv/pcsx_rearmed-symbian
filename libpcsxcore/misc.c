@@ -818,6 +818,13 @@ int SaveState(const char *file) {
 	return 0;
 }
 
+// Per-section progress lines of LoadState; each one costs a log write.
+#ifdef PS1_NO_DIAG
+#define LS_TRACE(...)
+#else
+#define LS_TRACE(...) SysPrintf(__VA_ARGS__)
+#endif
+
 int LoadState(const char *file) {
 	struct misc_save_data *misc = (void *)(psxRegs.ptrs.psxH + 0xf000);
 	u32 biosBranchCheckOld = psxRegs.biosBranchCheck;
@@ -883,7 +890,7 @@ int LoadState(const char *file) {
 	psxRegs.cpuInRecursion = 0;
 	psxRegs.gpuIdleAfter = psxRegs.cycle - 1;
 	HW_GPU_STATUS &= SWAP32(~PSXGPU_nBUSY);
-	SysPrintf("ls: ram+regs ok\n");
+	LS_TRACE("ls: ram+regs ok\n");
 	if (misc->magic == MISC_MAGIC) {
 		psxRegs.gteBusyCycle = misc->gteBusyCycle;
 		psxRegs.muldivBusyCycle = misc->muldivBusyCycle;
@@ -906,7 +913,7 @@ int LoadState(const char *file) {
 	assert(vram);
 	SaveFuncs.read(f, vram, 1024*512*2);
 	gpuSyncPluginSR();
-	SysPrintf("ls: gpu ok\n");
+	LS_TRACE("ls: gpu ok\n");
 
 	// spu
 	SaveFuncs.read(f, &Size, 4);
@@ -926,17 +933,17 @@ int LoadState(const char *file) {
 		SaveFuncs.seek(f, Size, SEEK_CUR);
 	}
 
-	SysPrintf("ls: spu ok\n");
+	LS_TRACE("ls: spu ok\n");
 	sioFreeze(f, 0);
-	SysPrintf("ls: sio ok\n");
+	LS_TRACE("ls: sio ok\n");
 	cdrFreeze(f, 0);
-	SysPrintf("ls: cdr ok\n");
+	LS_TRACE("ls: cdr ok\n");
 	psxHwFreeze(f, 0);
-	SysPrintf("ls: hw ok\n");
+	LS_TRACE("ls: hw ok\n");
 	psxRcntFreeze(f, 0);
-	SysPrintf("ls: rcnt ok\n");
+	LS_TRACE("ls: rcnt ok\n");
 	mdecFreeze(f, 0);
-	SysPrintf("ls: mdec ok\n");
+	LS_TRACE("ls: mdec ok\n");
 
 	if (Config.HLE != oldhle) {
 		// at least ari64 drc compiles differently so hard reset
@@ -944,17 +951,17 @@ int LoadState(const char *file) {
 		psxCpu->Init();
 	}
 	ndrc_freeze(f, 0);
-	SysPrintf("ls: ndrc ok\n");
+	LS_TRACE("ls: ndrc ok\n");
 	padFreeze(f, 0);
-	SysPrintf("ls: pad ok\n");
+	LS_TRACE("ls: pad ok\n");
 
 	events_restore();
-	SysPrintf("ls: events ok\n");
+	LS_TRACE("ls: events ok\n");
 	if (Config.HLE)
 		psxBiosCheckExe(biosBranchCheckOld, 0x60, 1);
 
 	psxCpu->Notify(R3000ACPU_NOTIFY_AFTER_LOAD_STATE, NULL);
-	SysPrintf("ls: notify ok\n");
+	LS_TRACE("ls: notify ok\n");
 
 	result = 0;
 cleanup:

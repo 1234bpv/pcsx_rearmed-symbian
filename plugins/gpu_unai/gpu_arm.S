@@ -1047,7 +1047,6 @@ poly_4_8bpp_asm_m poly_8bp_l0d0m0st0_asm, 8, 0,  0
 
 #ifdef HAVE_ARMV6
 
-poly_4_8bpp_asm_m poly_4bp_l1d0m0std_asm, 4, 1, -1
 poly_4_8bpp_asm_m poly_4bp_l1d0m0st0_asm, 4, 1,  0
 poly_4_8bpp_asm_m poly_4bp_l1d1m0std_asm, 4, 2, -1
 poly_4_8bpp_asm_m poly_4bp_l1d1m0st0_asm, 4, 2,  0
@@ -1198,10 +1197,234 @@ FUNCTION(\name): @ (void *d, const gpu_unai_inner_t *inn, int count, u32 dv)
     .cfi_endproc
 .endm
 
-poly_4bpp_g_asm_m poly_4bp_lgd0m0std_asm, 0, -1
 poly_4bpp_g_asm_m poly_4bp_lgd0m0st1_asm, 0,  1
 poly_4bpp_g_asm_m poly_4bp_lgd1m0std_asm, 1, -1
 poly_4bpp_g_asm_m poly_4bp_lgd1m0st1_asm, 1,  1
+
+@ r0: dst          r7 : texel word of the current pixel
+@ r1: src_texels   r8 : next texel word address | scratch
+@ r2: count|b16    r9 : mask | scratch
+@ r3: clut         r10: u_inc
+@ r4: u            r11: v_inc
+@ r5: v            r12: scratch
+@ r6: g16|r16      lr : scratch
+@ stack: gr16_inc, b16_inc, mask' (bits 0..2 clear), -, pf_delta, -, sp_offset, lr
+FUNCTION(poly_4bp_lgd0m0std_asm): @ (void *d, const gpu_unai_inner_t *inn, int count)
+    .cfi_startproc
+    mov     r12,sp
+    bic     sp, #31               @ align stack
+    sub     r12, r12, sp
+    stmfd   sp!,{r4-r11}
+    sub     sp, #32
+    str     r12,[sp, #0x18]       @ save sp_offset
+    str     lr, [sp, #0x1c]
+    .cfi_rel_offset lr, 0x1c
+    ldr     r3, [r1, 0x04]        @ clut
+    ldrd    r4, r5, [r1, 0x08]    @ u, v
+    ldrd    r10,r11,[r1, 0x18]    @ u_inc, v_inc
+    ldrh    r12,[r1, #0x2c]       @ b16
+    ldr     r6, [r1, #0x28]       @ g16|r16
+    ldr     r9, [r1, #0x10]       @ mask_v00u
+    pkhbt   r2, r12, r2, lsl #16  @ count|b16
+    ldr     r7, [r1, #0x30]       @ gr16_inc
+    ldr     r8, [r1, #0x34]       @ 0b16_inc
+    ldr     r1, [r1]              @ src_texels
+    pld_    r3                    @ clut
+    usub16  r6, r6, r7            @ g16|r16  adjust for loop
+    usub16  r2, r2, r8            @ b16
+    bic     r9, r9, #7            @ bits 0..2 never reach the address
+    stmia   sp, {r7-r9}           @ save gr16_inc, b16_inc, mask'
+#ifdef A3_PLD
+    @ byte delta of the texel word 2 pixels ahead: rows*2048 + words*4
+    mov     r12,r11, lsl #1
+    mov     r12,r12, asr #10
+    mov     r12,r12, lsl #11
+    mov     r7, r10, lsl #1
+    mov     r7, r7,  asr #13
+    add     r12,r12, r7, lsl #2
+    str     r12,[sp, #0x10]
+#endif
+    @ load the first texel:
+    and     lr, r5, r9, lsr #(24-10) @ l_v & (l_v_msk=mask_v00u>>14)
+    and     r12,r4, r9, lsl #10
+    add     lr, r1, lr, lsl #1
+    mov     r12,r12,lsr #13
+    add     r4, r4, r10           @ u_next
+    add     r5, r5, r11           @ v_next
+    ldr     r7, [lr, r12, lsl #2]
+    sub     r0, r0, #2            @ adjust for the loop
+0: @ loop:
+    ldr     r9, [sp, #0x08]       @ mask'
+    subs    r2, r2, #1<<16
+    sub     r12,r4, r10           @ undo u_next
+    bmi     1f @ done
+    @ next texel word address
+    and     lr, r5, r9, lsr #(24-10)
+    and     r8, r4, r9, lsl #10
+    lsr     r12,r12,#8
+    add     lr, r1, lr, lsl #1
+    and     r12,r12,#0x1c
+    add     r8, lr, r8, lsr #11
+#ifdef A3_PLD
+    ldr     r9, [sp, #0x10]
+#endif
+    sub     r12,r12,#1
+    add     r4, r4, r10           @ u_next_next
+    mov     r12,r7, ror r12       @ current texel word rotated to its nibble
+    add     r5, r5, r11           @ v_next_next
+#ifdef A3_PLD
+    add     r9, r9, r8
+    pld     [r9]
+#endif
+    and     r12,r12,#0x1e
+    add     r0, r0, #2
+    ldrsh   r12,[r3, r12]         @ the pixel
+    ldmia   sp, {r9, lr}          @ gr16_inc, b16_inc
+    ldr     r7, [r8]              @ next texel word (after the last use of r7)
+    uadd16  r6, r6, r9            @ g16|r16 current
+    uadd16  r2, r2, lr            @ b16 current
+    tst     r12,r12
+    uxtb16  lr, r6, ror #8        @ g16|r16 >> 8 & 0xff00ff
+    beq     0b
+    @ modulate/light, the multiplies and saturates interleaved
+    and     r9, r12, #0x001f      @ r
+    and     r8, r12, #0x03e0      @ g
+    smulbb  r9, r9, lr
+    and     r12,r12, #0x7c00      @ b
+    smulbt  r8, r8, lr
+    uxtb    lr, r2, ror #8
+    usat    r9, #5, r9, asr #7
+    smulbb  lr, lr, r12
+    usat    r8, #5, r8, asr #12
+    orrmi   r9, #0x8000
+    usat    lr, #5, lr, asr #17
+    orr     r9, r9, r8, lsl #5
+    orr     r9, r9, lr, lsl #10
+    strh    r9, [r0]
+    b       0b
+1: @ done
+    ldr     r0, [sp, #0x18]       @ sp_offset
+    ldr     lr, [sp, #0x1c]
+    add     sp, sp, #32
+    ldmfd   sp!,{r4-r11}
+    add     sp, sp, r0
+    bx      lr
+    .cfi_endproc
+
+FUNCTION(poly_4bp_l1d0m0std_asm): @ (void *d, const gpu_unai_inner_t *inn, int count)
+    .cfi_startproc
+    stmfd   sp!, {r3-r11,lr}
+    sub     sp, sp, #4*2
+    .cfi_def_cfa_offset 4*12
+    .cfi_rel_offset lr, 4*11
+    add     r12, r1, #4
+    ldmia   r12, {r3, r4, r7, r12} @ clut, u, v, mask_v00u
+    ldr     r5, [r1, #0x18]    @ u_inc
+    ldr     r10,[r1, #0x24]    @ rbg
+    mov     r6, r12            @ mask_v00u
+    ldr     r12,[r1, #0x1c]    @ v_inc
+    pld_    r3                 @ clut
+    mov     r10,r10,lsl #7     @ 0bbb bbbb 0ggg gggg 0rrr rrrr r000 0000
+    bic     r10,r10,#1<<23
+    bic     r10,r10,#1<<15
+    mov     r11,r10,lsl #8     @ 0ggg gggg ...
+    tst     r12,r12
+    ldr     r1, [r1]           @ src
+    sub     r0, r0, #2         @ adjust for loop
+    bne     10f @ use_vinc
+
+    @ no_vinc:
+    and     lr, r7, r6, lsr #(24-10)
+    bic     r6, r6, #7         @ bits 0..2 never reach the address
+    add     r1, r1, lr, lsl #1
+    mov     r6, r6, lsl #10
+    and     r9, r4, r6         @ masked u of the current pixel
+    add     r12,r1, r9, lsr #11 @ prefetch address (as the original)
+    pld_    r12,#2048          @ next line
+0:
+    subs    r2, r2, #1
+    lsr     r12,r4, #8
+    and     r12,r12,#0x1c
+    bmi     1f
+    ldr     lr, [r1, r9, lsr #11]
+    sub     r12,r12,#1
+    add     r4, r4, r5
+    mov     r12,lr, ror r12
+    and     r9, r4, r6         @ next pixel, while the CLUT load is in flight
+    and     r12,r12,#0x1e
+    ldrsh   r12,[r3, r12]
+    add     r0, r0, #2
+    tst     r12,r12
+    beq     0b
+    and     r7, r12, #0x001f
+    and     r8, r12, #0x03e0
+    and     lr, r12, #0x7c00
+    smulbb  r7, r7, r10
+    smulbt  r8, r8, r11
+    smulbt  lr, lr, r10
+    usat    r12,#5, r7, asr #14
+    usat    r8, #5, r8, asr #19
+    usat    lr, #5, lr, asr #24
+    orrmi   r12,r12,#0x8000
+    orr     r12,r12,r8, lsl #5
+    orr     r12,r12,lr, lsl #10
+    strh    r12,[r0]
+    b       0b
+1:
+    add     sp, sp, #4*3
+    ldmfd   sp!, {r4-r11,pc}
+
+10: @ use_vinc:
+    bic     r6, r6, #7         @ bits 0..2 never reach the address
+    stmia   sp, {r5,r6}        @ save {u_inc, mask'} for reload when we are out of regs
+    mov     r8, r12            @ v_inc
+    @ load the first texel:
+    and     lr, r7, r6, lsr #(24-10)
+    and     r12,r4, r6, lsl #10
+    add     lr, r1, lr, lsl #1
+    mov     r12,r12,lsr #13
+    ldr     r9, [lr, r12, lsl #2]
+    add     r4, r4, r5            @ u_next
+    add     r7, r7, r8            @ v_next
+0:
+    subs    r2, r2, #1
+    and     lr, r7, r6, lsr #(24-10)
+    and     r12,r4, r6, lsl #10
+    bmi     1f
+    add     lr, r1, lr, lsl #1
+    add     lr, lr, r12, lsr #11  @ next texel word
+    sub     r12,r4, r5            @ undo u_next
+    add     r4, r4, r5            @ u_next_next
+    lsr     r12,r12,#8
+    add     r7, r7, r8            @ v_next_next
+    and     r12,r12,#0x1c
+    sub     r12,r12,#1
+    add     r0, r0, #2
+    mov     r12,r9, ror r12
+    and     r12,r12,#0x1e
+    ldr     r9, [lr]              @ the slow next texel load
+    ldrsh   r12,[r3, r12]         @ the pixel
+    tst     r12,r12
+    beq     0b
+    and     r5, r12, #0x001f
+    and     r6, r12, #0x03e0
+    and     lr, r12, #0x7c00
+    smulbb  r5, r5, r10
+    smulbt  r6, r6, r11
+    smulbt  lr, lr, r10
+    usat    r12,#5, r5, asr #14
+    usat    r6, #5, r6, asr #19
+    usat    lr, #5, lr, asr #24
+    orrmi   r12,r12,#0x8000
+    orr     r12,r12,r6, lsl #5
+    ldmia   sp, {r5,r6}           @ r5/r6 are free again
+    orr     r12,r12,lr, lsl #10
+    strh    r12,[r0]
+    b       0b
+1:
+    add     sp, sp, #4*3
+    ldmfd   sp!, {r4-r11,pc}
+    .cfi_endproc
 
 #endif // HAVE_ARMV6
 

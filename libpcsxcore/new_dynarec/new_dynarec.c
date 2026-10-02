@@ -363,6 +363,46 @@ static struct compile_info
 // Bench-only counters read by src/symbian/stage1.cpp (event s2dyn).
 extern unsigned int ndrc_symbian_fastcount(void);
 unsigned int g_s2_rc_ticks, g_s2_rc_blocks, g_s2_rc_fail;          // new_recompile_block
+// Per-pass ticks (index = pass number 1..9), guest instructions in compiled blocks
+// (slen, delay slots included) and blocks whose start address was compiled before.
+unsigned int g_s2_rc_pass[10], g_s2_rc_slen, g_s2_rc_repeat, g_s2_rc_uniq;
+// By block size (slen < 16, < 32, ... >= 1024): [blocks, slen, ticks, pass 1..9 ticks].
+unsigned int g_s2_rc_bk[8][12];
+static unsigned int s2_seen[8192];
+static unsigned int s2_bits[(512 * 1024 + 128 * 1024) / 32]; // guest RAM, then BIOS, one bit per instruction
+static unsigned int s2_pass_cur, s2_pass_t0, s2_blk_pass[10], s2_blk_slen;
+
+static void s2_pass_mark(unsigned int n)
+{
+  unsigned int now = ndrc_symbian_fastcount();
+  if (s2_pass_cur)
+    s2_blk_pass[s2_pass_cur] += now - s2_pass_t0;
+  s2_pass_cur = n;
+  s2_pass_t0 = now;
+}
+
+static void s2_note_block(u_int addr, int slen)
+{
+  u_int h = (addr >> 2) * 2654435761u >> 19;
+  int k;
+  g_s2_rc_slen += slen;
+  s2_blk_slen = slen;
+  // Distinct guest instructions compiled: slen minus this is code compiled again
+  // because blocks overlap (a branch into the middle of a block starts a new one).
+  for (k = 0; k < slen; k++) {
+    u_int a = (addr + k * 4) & 0x1fffffff;
+    u_int idx = a >= 0x1fc00000u ? 512 * 1024 + ((a & 0x7ffff) >> 2) : (a & 0x1fffff) >> 2;
+    if (!(s2_bits[idx >> 5] & (1u << (idx & 31)))) {
+      s2_bits[idx >> 5] |= 1u << (idx & 31);
+      g_s2_rc_uniq++;
+    }
+  }
+  while (s2_seen[h]) {
+    if (s2_seen[h] == addr) { g_s2_rc_repeat++; return; }
+    h = (h + 1) & 8191;
+  }
+  s2_seen[h] = addr;
+}
 unsigned int g_s2_ht_live, g_s2_ht_hit0, g_s2_ht_hit1, g_s2_ht_slow; // ndrc_get_addr_ht_param
 unsigned int g_s2_links;                                            // ndrc_patch_link
 // Slow-path memory accesses by guest address class, [read, write][class]:
@@ -479,7 +519,11 @@ static void ndrc_write_invalidate_many(u_int addr, u_int end);
 // is not called on this hardware, so state must reside where a neighboring thread
 // can read it - in global memory, not on the stack.
 u_int ndrc_dbg_addr, ndrc_dbg_pass, ndrc_dbg_i, ndrc_dbg_slen, ndrc_dbg_out;
+#ifdef PS1_STAGE2_PROFILE
+#define NDRC_DBG_PASS(n) (ndrc_dbg_pass = (n), s2_pass_mark(n))
+#else
 #define NDRC_DBG_PASS(n) (ndrc_dbg_pass = (n))
+#endif
 #else
 #define NDRC_DBG_PASS(n)
 #endif
@@ -9840,6 +9884,9 @@ static int noinline new_recompile_block(u_int addr)
 #ifdef __SYMBIAN32__
   ndrc_dbg_slen = st.slen;
 #endif
+#ifdef PS1_STAGE2_PROFILE
+  s2_note_block(addr, st.slen);
+#endif
 
   int clear_hack_addr = apply_hacks(&st);
 
@@ -10197,9 +10244,24 @@ static int noinline new_recompile_block(u_int addr)
 static int new_recompile_block(u_int addr)
 {
   const unsigned int t0 = ndrc_symbian_fastcount();
+  memset(s2_blk_pass, 0, sizeof(s2_blk_pass));
+  s2_blk_slen = 0;
   const int r = new_recompile_block_impl(addr);
-  g_s2_rc_ticks += ndrc_symbian_fastcount() - t0;
+  const unsigned int dt = ndrc_symbian_fastcount() - t0;
+  g_s2_rc_ticks += dt;
   if (r == 0) g_s2_rc_blocks++; else g_s2_rc_fail++;
+  if (s2_blk_slen) {
+    unsigned int b = 0, k;
+    while (b < 7 && (s2_blk_slen >> (4 + b)))
+      b++;
+    g_s2_rc_bk[b][0]++;
+    g_s2_rc_bk[b][1] += s2_blk_slen;
+    g_s2_rc_bk[b][2] += dt;
+    for (k = 1; k < 10; k++) {
+      g_s2_rc_pass[k] += s2_blk_pass[k];
+      g_s2_rc_bk[b][2 + k] += s2_blk_pass[k];
+    }
+  }
   return r;
 }
 #endif

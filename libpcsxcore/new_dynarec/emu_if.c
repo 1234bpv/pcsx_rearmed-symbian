@@ -94,6 +94,10 @@ void ndrc_freeze(void *f, int mode)
 		NDRC_TRACE("ndrc: load blocks size=%d skip=%d\n", size, ndrc_skip_load_blocks);
 		if (psxCpu != &psxInt && !ndrc_skip_load_blocks)
 			new_dynarec_load_blocks(addrs, size);
+		// load_blocks also drops blocks compiled from the RAM the state replaced;
+		// without it a state loaded from another game screen runs stale code.
+		else if (psxCpu != &psxInt)
+			new_dynarec_invalidate_all_pages();
 		NDRC_TRACE("ndrc: load blocks done\n");
 	}
 

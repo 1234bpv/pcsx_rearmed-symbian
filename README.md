@@ -1,3 +1,13 @@
+> **This is the core of [PS1Emulator](https://github.com/1234bpv/PS1Emulator),**
+> a PlayStation emulator for Nokia phones with Symbian 9.1-9.3 and an ARM11
+> processor. It is a fork of
+> [notaz/pcsx_rearmed](https://github.com/notaz/pcsx_rearmed), and the Symbian
+> changes are on the branch `symbian`. The installation file, the instructions
+> and the build steps are in PS1Emulator, which checks this repository out into
+> its `pcsx_rearmed/` folder. The licence is GPL-2.0, as upstream (see
+> [`COPYING`](COPYING)). Everything below this note is the upstream README and
+> describes upstream, including the CI badge.
+
 PCSX-ReARMed - yet another PCSX fork
 ====================================
 

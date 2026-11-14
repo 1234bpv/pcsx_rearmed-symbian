@@ -130,10 +130,12 @@ void LoadCheats(const char *filename) {
 			}
 		}
 
-		sscanf(buf, "%x %x", &t1, &t2);
+		if (sscanf(buf, "%x %x", &t1, &t2) != 2)
+			continue;
 
 		CheatCodes[NumCodes].Addr = t1;
 		CheatCodes[NumCodes].Val = t2;
+		CheatCodes[NumCodes].OldVal = 0;
 
 		NumCodes++;
 		count++;
@@ -209,12 +211,15 @@ void ApplyCheats() {
 					case CHEAT_CONST8:
 						CheatCodes[j].OldVal = psxMu8(addr);
 						break;
+					default:
+						CheatCodes[j].OldVal = 0;
+						break;
 				}
 			}
 			else if (!Cheats[i].Enabled) {
-				val = CheatCodes[j].OldVal;
 				if (type != CHEAT_CONST16 && type != CHEAT_CONST8)
 					continue;
+				val = CheatCodes[j].OldVal;
 			}
 
 			switch (type) {

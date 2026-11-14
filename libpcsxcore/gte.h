@@ -58,6 +58,9 @@ struct psxCP2Regs;
 
 extern const unsigned char gte_cycletab[64];
 
+extern int g_gte_fx_q12;
+extern int g_gte_fy_q12;
+
 void gteCheckStall(u32 op);
 void gteDispatch(psxCP2Regs *regs, u32 code);
 

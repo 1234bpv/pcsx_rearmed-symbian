@@ -395,6 +395,9 @@ INLINE u32 DIVIDE(u16 n, u16 d) {
 
 #ifndef FLAGLESS
 
+int g_gte_fx_q12 = 4096;
+int g_gte_fy_q12 = 4096;
+
 const unsigned char gte_cycletab[64] = {
 	/*   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f */
 	 0, 15,  0,  0,  0,  0,  8,  0,  0,  0,  0,  0,  6,  0,  0,  0,
@@ -566,6 +569,20 @@ static u32 gteMAC123f(psxCP2Regs *regs, s32 vx, s32 vy, s32 vz,
 
 #endif
 
+static inline s64 gte_scale_x(s64 ir_q)
+{
+	if (likely(g_gte_fx_q12 == 4096))
+		return ir_q;
+	return (ir_q * g_gte_fx_q12) >> 12;
+}
+
+static inline s64 gte_scale_y(s64 ir_q)
+{
+	if (likely(g_gte_fy_q12 == 4096))
+		return ir_q;
+	return (ir_q * g_gte_fy_q12) >> 12;
+}
+
 static inline force_inline void gteRTPS(psxCP2Regs *regs, int shift, int lm)
 {
 	s32 vx = gteVX0, vy = gteVY0, vz = gteVZ0;
@@ -593,8 +610,8 @@ static inline force_inline void gteRTPS(psxCP2Regs *regs, int shift, int lm)
 	gteSXY0 = gteSXY1;
 	gteSXY1 = gteSXY2;
 
-	gteSX2 = limG1(&flags, mac0flags(&flags, gteOFX + (s64)gteIR1 * quotient) >> 16);
-	gteSY2 = limG2(&flags, mac0flags(&flags, gteOFY + (s64)gteIR2 * quotient) >> 16);
+	gteSX2 = limG1(&flags, mac0flags(&flags, gteOFX + gte_scale_x((s64)gteIR1 * quotient)) >> 16);
+	gteSY2 = limG2(&flags, mac0flags(&flags, gteOFY + gte_scale_y((s64)gteIR2 * quotient)) >> 16);
 
 	gteMAC0 = mac0 = mac0flags(&flags, gteDQB + (s64)gteDQA * quotient);
 	gteIR0 = limH(&flags, mac0 >> 12);
@@ -629,8 +646,8 @@ static inline force_inline void gteRTPT(psxCP2Regs *regs, int shift, int lm)
 		sz3 = limD(&flags, sz3);
 		quotient = divide(&flags, h, sz3);
 		fSZ(v) = sz3;
-		fSX(v) = limG1(&flags, mac0flags(&flags, gteOFX + (s64)ir1 * quotient) >> 16);
-		fSY(v) = limG2(&flags, mac0flags(&flags, gteOFY + (s64)ir2 * quotient) >> 16);
+		fSX(v) = limG1(&flags, mac0flags(&flags, gteOFX + gte_scale_x((s64)ir1 * quotient)) >> 16);
+		fSY(v) = limG2(&flags, mac0flags(&flags, gteOFY + gte_scale_y((s64)ir2 * quotient)) >> 16);
 	}
 
 	gteMAC1 = mac1;
